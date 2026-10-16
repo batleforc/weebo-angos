@@ -168,6 +168,13 @@ applied() {
 }
 
 step "a real Angos: its first configuration, its probes through the access policy"
+# The pods settled first: an operator upgrade may have rolled them (its
+# pod template changed), and a replaced pod is still Running a while.
+kubectl -n team-a rollout status deploy/registry --timeout="$WAIT"
+for _ in $(seq 1 60); do
+  [ "$(kubectl -n team-a get pods -l app.kubernetes.io/instance=registry -o name | wc -l)" -eq 1 ] && break
+  sleep 2
+done
 first_pod="$(pod_name)"
 [ -n "$first_pod" ] || fail "no Angos pod"
 [ "$(field '{.status.version}')" = 1.12.3 ] || fail "status.version: $(field '{.status.version}')"
