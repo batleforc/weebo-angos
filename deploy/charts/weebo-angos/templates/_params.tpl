@@ -66,8 +66,46 @@ env:
 # The operator never calls Angos (no administration API): files, objects,
 # pod logs and pod status only, all through the API server.
 egress: []
-# Alerts on the operator's own metrics, appended to the kit's.
-alerts: []
+# Alerts on the operator's own metrics, appended to the kit's (only with
+# prometheusRule.enabled, which needs metrics.prometheus.enabled). Names
+# matched by regex like the kit's: the OTel -> Prometheus translation may
+# suffix a gauge `_ratio`, a counter `_total`.
+{{- $sel := printf "namespace=%q, job=%q" .Release.Namespace (printf "%s-metrics" (include "weebo-operator.fullname" .)) }}
+alerts:
+  - alert: AngosInstanceNotReady
+    expr: |
+      max by (instance_namespace, instance_name) ({__name__=~"weebo_angos_instance_ready(_ratio)?", {{ $sel }}}) == 0
+    for: 15m
+    labels:
+      severity: warning
+    annotations:
+      summary: {{`'AngosLocalInstance {{ $labels.instance_namespace }}/{{ $labels.instance_name }} not Ready for 15 minutes'`}}
+      description: {{`'kubectl -n {{ $labels.instance_namespace }} get ali {{ $labels.instance_name }}: the Ready condition says why.'`}}
+  - alert: AngosConfigRejected
+    expr: |
+      sum by (instance_namespace, instance_name) (increase({__name__=~"weebo_angos_config_reloads(_total)?", result="rejected", {{ $sel }}}[15m])) > 0
+    labels:
+      severity: warning
+    annotations:
+      summary: {{`'Angos refused the configuration of {{ $labels.instance_namespace }}/{{ $labels.instance_name }}'`}}
+      description: {{`'The last accepted configuration runs (status.rejectionMessage says why): fix the spec, a repository or a Secret.'`}}
+  - alert: AngosPruneSkipped
+    expr: |
+      sum by (task) (increase({__name__=~"weebo_angos_maintenance_runs(_total)?", task="Prune", result="skipped", {{ $sel }}}[48h])) > 0
+      unless sum by (task) (increase({__name__=~"weebo_angos_maintenance_runs(_total)?", task="Prune", result="success", {{ $sel }}}[48h])) > 0
+    labels:
+      severity: warning
+    annotations:
+      summary: 'No Angos prune ran for 48 hours, some were skipped'
+      description: {{`'kubectl get amaint -A: the MaintenanceSkipped condition says what holds the prune lock (a repository not rendered, released recently, or the instance not confirmed).'`}}
+  - alert: AngosMaintenanceFailing
+    expr: |
+      sum by (task) (increase({__name__=~"weebo_angos_maintenance_runs(_total)?", result="failure", {{ $sel }}}[1h])) > 0
+    labels:
+      severity: warning
+    annotations:
+      summary: {{`'AngosMaintenance runs of {{ $labels.task }} failed in the last hour'`}}
+      description: {{`'kubectl get amaint -A: status.lastRun has the exit code and the end of the log.'`}}
 {{- end -}}
 
 {{/* The rules on the namespaced resources of the instances' namespaces:

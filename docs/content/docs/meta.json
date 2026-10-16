@@ -4,6 +4,8 @@
     "index",
     "---Getting started---",
     "guides/install",
+    "guides/scaling-and-upgrades",
+    "guides/monitoring",
     "---Reference---",
     "...crds",
     "reference"

@@ -117,6 +117,7 @@ async fn reconcile(obj: Arc<LocalInstance>, ctx: Arc<Ctx>) -> Result<Action, Err
         match event {
             Finalizer::Apply(instance) => apply(&api, &instance, &ctx).await,
             Finalizer::Cleanup(instance) => {
+                super::metrics::forget_instance(&namespace, &instance.name_any());
                 // Its objects go with it (owner references): nothing to
                 // undo yet. Repositories and identities will hold it
                 // (InstanceInUse) once they exist.
@@ -170,6 +171,13 @@ async fn apply(
     )
     .await;
     super::record_reconcile(KIND, started, &report.outcome);
+    super::metrics::record_instance(
+        &owner.namespace,
+        &owner.name,
+        report.outcome.ready.is_ok(),
+        &previous,
+        &report.status,
+    );
     weebo_kit_runtime::status::publish(
         api,
         &ctx.recorder,

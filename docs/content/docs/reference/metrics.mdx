@@ -20,6 +20,10 @@ description: What the operator exports, the probes it answers, and the settings 
 | `weebo_angos_reconcile_duration_seconds` | histogram | `kind` | Reconcile run duration; buckets 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120 s |
 | `weebo_angos_webhook_decisions_total` | counter | `kind`, `result` (`allow`/`deny`) | Admission webhook decisions |
 | `weebo_angos_leader` | gauge (0/1) | none | `1` on the replica holding the leader lease |
+| `weebo_angos_instance_ready` | gauge | `instance_namespace`, `instance_name` | 1 when the AngosLocalInstance is `Ready`, 0 otherwise; gone with the instance |
+| `weebo_angos_config_reloads_total` | counter | `instance_namespace`, `instance_name`, `result` (`applied`, `rejected`, `unconfirmed`: the pods rolled instead) | Hot layers the pods answered |
+| `weebo_angos_rollouts_total` | counter | `instance_namespace`, `instance_name`, `cause` (`boot`, `image`, `storage`, `fallback`) | Rollouts of an instance's pods: a startup layer, an Angos version, a confirmed storage change, a reload they didn't confirm |
+| `weebo_angos_maintenance_runs_total` | counter | `task`, `result` (`success`, `failure`, `skipped`) | Maintenance runs ended or skipped |
 
 `result` and `reason` come from the reason code the reconcile ended on,
 so the label set stays bounded by the [catalog](/docs/reference/reason-codes).
