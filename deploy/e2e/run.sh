@@ -273,7 +273,6 @@ code="$(registry -X POST "$base/scratch/e2e/blobs/uploads/")"
 [ "$code" = 202 ] || fail "a push to scratch answered $code"
 code="$(registry -X POST "$base/undeclared/e2e/blobs/uploads/")"
 case "$code" in 202) fail "a push to an undeclared namespace was accepted" ;; esac
-kubectl -n team-a delete pod e2e-probe --wait=false >/dev/null
 # What would crash Angos's CEL parser, and an overlapping prefix: refused.
 if kubectl apply -f - 2>/dev/null <<'YAML'
 apiVersion: angos.weebo.io/v1alpha1
@@ -310,9 +309,10 @@ for _ in $(seq 1 90); do
 done
 [ "$got" = Reconciled ] || fail "secure: Ready reason is ${got:-<none>}, expected Reconciled"
 # Served over TLS (self-signed: not verified here).
-kubectl -n team-a run tls-probe --rm -i --restart=Never --quiet \
-  --image=docker.io/curlimages/curl:8.17.0 -- -skf -o /dev/null -w '%{http_code}\n' \
-  https://secure.team-a.svc:8000/readyz | grep -q 200 || fail "secure: /readyz over TLS"
+# (`kubectl run -i --rm` may attach after a short command exited and print
+# nothing: the long-lived probe pod is used.)
+code="$(registry -k https://secure.team-a.svc:8000/readyz)"
+[ "$code" = 200 ] || fail "secure: /readyz over TLS answered $code"
 # The generated token key and the cluster's issuer reached the file.
 kubectl -n team-a get secret secure-token-key -o name >/dev/null || fail "secure: no generated token key"
 kubectl -n team-a get secret secure-config -o jsonpath='{.data.config\.toml}' | base64 -d \
