@@ -346,8 +346,9 @@ pub struct GlobalAccess {
     /// groups or ServiceAccounts only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub jobs: Vec<String>,
-    /// Who may do anything: named identities, groups or ServiceAccounts
-    /// only.
+    /// Who may do anything, in every repository too (the rule is added to
+    /// each repository's policy): named identities, groups or
+    /// ServiceAccounts only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub admin: Vec<String>,
     /// Who may scrape `/metrics`.

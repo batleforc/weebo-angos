@@ -163,6 +163,7 @@ pub fn check_instance(
     resolved.global_rules = rules::global_access(&spec.global.access, kube, checker)
         .map_err(invalid)?
         .rules;
+    resolved.admin_rule = rules::admin_rule(&spec.global.access, kube);
     if let Some(retention) = &spec.global.retention {
         rules::image_rules("spec.global.retention.rules", &retention.rules, checker)
             .map_err(invalid)?;
