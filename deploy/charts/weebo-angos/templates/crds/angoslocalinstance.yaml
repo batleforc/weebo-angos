@@ -583,6 +583,20 @@ spec:
               priorityClassName:
                 nullable: true
                 type: string
+              pruneLock:
+                default:
+                  windowHours: 24
+                description: |-
+                  The prune lock (spec 6.6): no `AngosMaintenance` prune runs while a
+                  repository was released less than `windowHours` ago (its data goes
+                  at the next prune: time to notice and recreate it).
+                properties:
+                  windowHours:
+                    default: 24
+                    format: uint32
+                    minimum: 0.0
+                    type: integer
+                type: object
               reload:
                 default:
                   mode: Hot
@@ -1298,6 +1312,48 @@ spec:
                   `<service>.<namespace>.svc:<port>`.
                 nullable: true
                 type: string
+              identities:
+                additionalProperties:
+                  description: What an instance made of an identity bound to it.
+                  properties:
+                    appliedVersion:
+                      description: |-
+                        The password version every pod of the instance confirmed loading:
+                        what the identity's targets may get.
+                      format: uint64
+                      minimum: 0.0
+                      nullable: true
+                      type: integer
+                    conflictWith:
+                      nullable: true
+                      type: string
+                    message:
+                      nullable: true
+                      type: string
+                    state:
+                      enum:
+                      - Rendered
+                      - Conflict
+                      - SecretMissing
+                      - SecretNotAllowed
+                      - Invalid
+                      type: string
+                    username:
+                      type: string
+                    version:
+                      description: The password version rendered.
+                      format: uint64
+                      minimum: 0.0
+                      nullable: true
+                      type: integer
+                  required:
+                  - state
+                  - username
+                  type: object
+                description: |-
+                  The identities bound to the instance and what became of each
+                  (`namespace/name`).
+                type: object
               lastAppliedTime:
                 nullable: true
                 type: string
@@ -1345,10 +1401,24 @@ spec:
               rejectionMessage:
                 nullable: true
                 type: string
+              releasedRepositories:
+                additionalProperties:
+                  type: string
+                description: |-
+                  The repositories that left the configuration, and when
+                  (`namespace/name`): a prune waits `pruneLock.windowHours` after.
+                type: object
               repositories:
                 additionalProperties:
                   description: What an instance made of a repository bound to it.
                   properties:
+                    appliedGeneration:
+                      description: |-
+                        The `metadata.generation` every pod of the instance confirmed
+                        loading.
+                      format: int64
+                      nullable: true
+                      type: integer
                     conflictWith:
                       description: The repository holding its prefix (`namespace/name`), in conflict.
                       nullable: true

@@ -8,5 +8,15 @@
     "kind": "AngosRepository",
     "singular": "angosrepository",
     "scope": "Namespaced"
+  },
+  {
+    "kind": "AngosIdentity",
+    "singular": "angosidentity",
+    "scope": "Namespaced"
+  },
+  {
+    "kind": "AngosMaintenance",
+    "singular": "angosmaintenance",
+    "scope": "Namespaced"
   }
 ]

@@ -11,3 +11,5 @@ the CRDs themselves, so they always match the installed version.
 | --- | --- | --- | --- |
 | [`AngosLocalInstance`](/docs/crds/angoslocalinstance) | `ali` | Namespaced | An Angos registry the operator runs in this namespace: its `Deployment`, its configuration (rendered from this spec, its repositories and identities) and the objects around them. |
 | [`AngosRepository`](/docs/crds/angosrepository) | `arepo` | Namespaced | A repository of an Angos instance: the namespaces under its `prefix`, who may pull, browse, push and delete there, where it caches from and replicates to. |
+| [`AngosIdentity`](/docs/crds/angosidentity) | `aid` | Namespaced | A Basic identity of an Angos instance (`[auth.identity]`): a robot, a CI, a scanner. |
+| [`AngosMaintenance`](/docs/crds/angosmaintenance) | `amaint` | Namespaced | A task of Angos's CLI on an instance of this namespace (`angos scrub`, `prune`, `reconcile …`), once or on a schedule, run as a `Job` with the instance's image and configuration. |

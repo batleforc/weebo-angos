@@ -75,6 +75,14 @@ pub async fn run(client: Client, ctx: Arc<Ctx>) {
                 Some(ObjectRef::new(&bound.name).within(bound.namespace.as_deref()?))
             },
         )
+        .watches(
+            ctx.scope.api::<api::Identity>(client.clone()),
+            ctx.scope.watcher_config(),
+            |identity| {
+                let bound = identity.status.as_ref()?.common.instance.clone()?;
+                Some(ObjectRef::new(&bound.name).within(bound.namespace.as_deref()?))
+            },
+        )
         .graceful_shutdown_on(ctx.shutdown.wait())
         .run(reconcile, error_policy, ctx);
     super::drive(KIND, health, results).await;
@@ -154,6 +162,7 @@ async fn apply(
             keys: ctx.keys.as_ref(),
             ledger: &ledger,
             repositories: ctx.repositories.as_ref(),
+            identities: ctx.identities.as_ref(),
             cel: ctx.cel.as_ref(),
         },
     )

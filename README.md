@@ -10,9 +10,11 @@ runs its workload, and reads what the pods did with it in their logs.
 | -------------------- | ----- | ------------------------------------------------------------------------- |
 | `AngosLocalInstance` | `ali` | An Angos registry in a namespace: its workload and configuration          |
 | `AngosRepository`    | `arepo` | A repository of an instance: its prefix, access, upstreams, downstreams |
+| `AngosIdentity`      | `aid` | A Basic identity: generated password, Argon2id hash, written to targets  |
+| `AngosMaintenance`   | `amaint` | `scrub`, `prune`, `reconcile …` as Jobs, scheduled, prune-locked       |
 
-Coming next (milestones M3–M5): `AngosIdentity` (`aid`),
-`AngosMaintenance` (`amaint`), the worker and replicas.
+Coming next (milestones M4–M5): the worker and replicas, webhooks,
+version upgrades, the importer.
 
 Targets Angos **1.12.3** (`api::angos`): the configuration model
 (`domain::config`), the rules Angos checks it with

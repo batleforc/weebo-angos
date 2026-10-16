@@ -634,6 +634,21 @@
       "nullable": true,
       "type": "string"
     },
+    "pruneLock": {
+      "default": {
+        "windowHours": 24
+      },
+      "description": "The prune lock (spec 6.6): no `AngosMaintenance` prune runs while a\nrepository was released less than `windowHours` ago (its data goes\nat the next prune: time to notice and recreate it).",
+      "properties": {
+        "windowHours": {
+          "default": 24,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "reload": {
       "default": {
         "mode": "Hot",

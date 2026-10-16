@@ -30,9 +30,21 @@ pub struct RepositoryView {
     pub generation: Option<i64>,
     pub annotations: BTreeMap<String, String>,
     pub spec: RepositorySpec,
+    /// Being deleted (its finalizer holds it).
+    pub deleting: bool,
 }
 
 impl RepositoryView {
+    /// Deleted with `allow-data-deletion: "true"`: out of the configuration.
+    pub fn released(&self) -> bool {
+        self.deleting
+            && self
+                .annotations
+                .get(annotations::ALLOW_DATA_DELETION)
+                .map(String::as_str)
+                == Some("true")
+    }
+
     /// `namespace/name`.
     pub fn key(&self) -> String {
         format!("{}/{}", self.namespace, self.name)
@@ -265,6 +277,7 @@ mod tests {
             generation: Some(1),
             annotations: BTreeMap::new(),
             spec: serde_json::from_value(spec).unwrap(),
+            deleting: false,
         }
     }
 

@@ -3,6 +3,8 @@
   "pages": [
     "index",
     "angoslocalinstance",
-    "angosrepository"
+    "angosrepository",
+    "angosidentity",
+    "angosmaintenance"
   ]
 }

@@ -87,6 +87,14 @@ pub struct InstanceStatus {
     /// (`namespace/name`): rendered, or why not.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub repositories: BTreeMap<String, RepositoryRender>,
+    /// The repositories that left the configuration, and when
+    /// (`namespace/name`): a prune waits `pruneLock.windowHours` after.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub released_repositories: BTreeMap<String, String>,
+    /// The identities bound to the instance and what became of each
+    /// (`namespace/name`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub identities: BTreeMap<String, IdentityRender>,
     /// When the operator last rolled the pods for an unconfirmed reload.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rolled_out_for: Option<String>,
@@ -130,6 +138,10 @@ pub struct RepositoryRender {
     /// The `metadata.generation` rendered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<i64>,
+    /// The `metadata.generation` every pod of the instance confirmed
+    /// loading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_generation: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -144,4 +156,23 @@ pub enum RenderState {
     SecretNotAllowed,
     /// Its spec can't be rendered.
     Invalid,
+}
+
+/// What an instance made of an identity bound to it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityRender {
+    pub username: String,
+    pub state: RenderState,
+    /// The password version rendered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<u64>,
+    /// The password version every pod of the instance confirmed loading:
+    /// what the identity's targets may get.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_version: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conflict_with: Option<String>,
 }

@@ -7,7 +7,9 @@
 //! ([`LocalInstance`]).
 
 pub mod config;
+pub mod identity;
 pub mod local_instance;
+pub mod maintenance;
 pub mod repository;
 pub mod status;
 
@@ -64,6 +66,8 @@ pub mod angos {
     pub const SUPPORTED_VERSIONS: &[&str] = &["1.12.3"];
 }
 
+pub use identity::Identity;
 pub use local_instance::LocalInstance;
+pub use maintenance::Maintenance;
 pub use repository::Repository;
 pub use status::{InstanceStatus, Status};

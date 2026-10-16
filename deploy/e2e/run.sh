@@ -47,7 +47,12 @@ dump() {
   step "diagnostics"
   kubectl -n "$OPERATOR_NS" get pods -o wide
   kubectl -n "$OPERATOR_NS" logs -l app.kubernetes.io/name=weebo-angos --tail=200 --prefix --all-containers
-  kubectl -n team-a get angoslocalinstances,angosrepositories -o yaml
+  kubectl -n team-a get angoslocalinstances,angosrepositories,angosidentities,angosmaintenances -o yaml
+  kubectl -n team-a get jobs,pods -o wide
+  kubectl -n team-a logs deploy/registry --timestamps --tail=400 | grep -v 'readyz\|healthz' | tail -40
+  kubectl -n team-a get secret registry-config -o jsonpath='{.data.config\.toml}' | base64 -d | grep -A3 'auth.identity'
+  kubectl -n team-a get secret ci-angos-password -o jsonpath='{.data.version}' | base64 -d; echo
+  kubectl -n weebo-angos-system logs -l app.kubernetes.io/name=weebo-angos --tail=400 | grep -i 'identit\|ci\b' | tail -20
   kubectl get events -A --sort-by=.lastTimestamp | tail -n 50
 }
 # dump turns errexit off: leave right after it.
@@ -318,6 +323,101 @@ kubectl -n team-a get secret secure-token-key -o name >/dev/null || fail "secure
 kubectl -n team-a get secret secure-config -o jsonpath='{.data.config\.toml}' | base64 -d \
   | grep -q 'bearer_token_file = "/var/run/secrets/angos/kube/token"' \
   || fail "secure: auth.kubernetes not rendered"
+
+step "an identity: its password works, and a rotation replaces it"
+kubectl apply -f - <<'YAML'
+apiVersion: angos.weebo.io/v1alpha1
+kind: AngosIdentity
+metadata:
+  name: ci
+  namespace: team-a
+spec:
+  instanceRef: { name: registry }
+---
+apiVersion: angos.weebo.io/v1alpha1
+kind: AngosRepository
+metadata:
+  name: ci
+  namespace: team-a
+spec:
+  instanceRef: { name: registry }
+  prefix: ci
+  access:
+    push: ["identity:ci"]
+YAML
+cr_reason_is angosidentity ci Reconciled
+cr_reason_is angosrepository ci Reconciled
+password="$(kubectl -n team-a get secret ci-credentials -o jsonpath='{.data.password}' | base64 -d)"
+[ -n "$password" ] || fail "ci: no password in ci-credentials"
+code="$(registry -u "ci:$password" -X POST "$base/ci/e2e/blobs/uploads/")"
+[ "$code" = 202 ] || fail "ci: a push with its password answered $code"
+code="$(registry -X POST "$base/ci/e2e/blobs/uploads/")"
+case "$code" in 202) fail "an anonymous push to ci was accepted" ;; esac
+kubectl -n team-a annotate angosidentity ci angos.weebo.io/rotate="$(date +%s)" --overwrite
+for _ in $(seq 1 90); do
+  [ "$(kubectl -n team-a get angosidentity ci -o jsonpath='{.status.passwordVersion}')" = 2 ] && break
+  sleep 2
+done
+[ "$(kubectl -n team-a get angosidentity ci -o jsonpath='{.status.passwordVersion}')" = 2 ] \
+  || fail "ci: the rotation never reached the targets"
+rotated="$(kubectl -n team-a get secret ci-credentials -o jsonpath='{.data.password}' | base64 -d)"
+[ "$rotated" != "$password" ] || fail "ci: the password didn't change"
+code="$(registry -u "ci:$rotated" -X POST "$base/ci/e2e/blobs/uploads/")"
+[ "$code" = 202 ] || fail "ci: a push with the new password answered $code"
+code="$(registry -u "ci:$password" -X POST "$base/ci/e2e/blobs/uploads/")"
+case "$code" in 202) fail "ci: the old password still works" ;; esac
+
+step "a prune: skipped while a repository could lose its data, then a real dry run"
+kubectl -n team-a patch angoslocalinstance secure --type merge -p '{"spec":{"pruneLock":{"windowHours":0}}}'
+kubectl apply -f - <<'YAML'
+apiVersion: angos.weebo.io/v1alpha1
+kind: AngosRepository
+metadata:
+  name: lost
+  namespace: team-a
+spec:
+  instanceRef: { name: secure }
+  prefix: lost
+  upstreams:
+    - url: https://ghcr.io
+      credentialsSecretRef: { name: missing }
+---
+apiVersion: angos.weebo.io/v1alpha1
+kind: AngosMaintenance
+metadata:
+  name: prune
+  namespace: team-a
+spec:
+  instanceRef: { name: secure }
+  task: Prune
+YAML
+cr_reason_is angosrepository lost SecretMissing
+for _ in $(seq 1 60); do
+  skipped="$(kubectl -n team-a get angosmaintenance prune \
+    -o jsonpath='{.status.conditions[?(@.type=="MaintenanceSkipped")].message}')"
+  [ -n "$skipped" ] && break
+  sleep 2
+done
+printf '%s' "$skipped" | grep -q 'team-a/lost' || fail "prune: not skipped for team-a/lost: $skipped"
+[ -z "$(kubectl -n team-a get angosmaintenance prune -o jsonpath='{.status.lastRun}')" ] \
+  || fail "prune: a run started despite the lock"
+# Its deletion needs the consent, then the lock lifts.
+kubectl -n team-a delete angosrepository lost --wait=false
+cr_reason_is angosrepository lost DeletionNotAllowed
+kubectl -n team-a annotate angosrepository lost angos.weebo.io/allow-data-deletion=true
+kubectl -n team-a wait --for=delete angosrepository/lost --timeout="$WAIT"
+kubectl -n team-a annotate angosmaintenance prune angos.weebo.io/run-now="$(date +%s)" --overwrite
+for _ in $(seq 1 120); do
+  state="$(kubectl -n team-a get angosmaintenance prune -o jsonpath='{.status.lastRun.state}')"
+  [ "$state" = Succeeded ] && break
+  case "$state" in Failed|TimedOut|Interrupted)
+    fail "prune: $state: $(kubectl -n team-a get angosmaintenance prune -o jsonpath='{.status.lastRun.message}')" ;;
+  esac
+  sleep 2
+done
+[ "$state" = Succeeded ] || fail "prune: last run ${state:-<none>}"
+[ -n "$(kubectl -n team-a get angosmaintenance prune -o jsonpath='{.status.lastDryRun.time}')" ] \
+  || fail "prune: no dry-run report"
 
 step "the webhook refuses what the operator wouldn't run"
 if kubectl apply -f - 2>/dev/null <<'YAML'

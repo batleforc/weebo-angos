@@ -66,6 +66,8 @@ pub struct Resolved {
     pub index: Option<Policy<domain::config::IndexAction>>,
     /// The repositories rendered, by prefix.
     pub repositories: BTreeMap<String, domain::config::Repository>,
+    /// The identities rendered: username → Argon2 PHC hash.
+    pub identities: BTreeMap<String, String>,
 }
 
 /// The two files of an instance and what tells them apart.
@@ -327,6 +329,15 @@ pub fn model(spec: &LocalInstanceSpec, resolved: &Resolved) -> AngosConfig {
     });
 
     config.repository = resolved.repositories.clone();
+    for (username, hash) in &resolved.identities {
+        config.auth.identity.insert(
+            username.clone(),
+            domain::config::Identity {
+                username: username.clone(),
+                password: hash.clone(),
+            },
+        );
+    }
 
     // Observability.
     config.observability = spec.tracing.as_ref().map(|t| Observability {

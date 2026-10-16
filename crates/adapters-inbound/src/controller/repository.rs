@@ -8,9 +8,12 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use api::{LocalInstance, Repository};
-use application::use_cases::reconcile_repository::{RepositoryPass, reconcile_repository};
+use application::use_cases::reconcile_repository::{
+    RepositoryPass, reconcile_repository, release_repository,
+};
 use kube::api::Api;
 use kube::runtime::controller::Action;
+use kube::runtime::finalizer::{Event as Finalizer, finalizer};
 use kube::runtime::reflector::ObjectRef;
 use kube::{Client, Resource, ResourceExt};
 use weebo_kit_runtime::status::StatusUpdate;
@@ -43,9 +46,50 @@ pub async fn run(client: Client, ctx: Arc<Ctx>) {
 }
 
 async fn reconcile(obj: Arc<Repository>, ctx: Arc<Ctx>) -> Result<Action, Error> {
-    if obj.meta().deletion_timestamp.is_some() {
-        return Ok(Action::await_change());
-    }
+    let namespace = obj.namespace().unwrap_or_default();
+    let api: Api<Repository> = Api::namespaced(ctx.client.clone(), &namespace);
+    finalizer(&api, super::FINALIZER, obj, |event| async {
+        match event {
+            Finalizer::Apply(repo) => apply(repo, ctx.clone()).await,
+            Finalizer::Cleanup(repo) => {
+                let status = repo.status.clone().unwrap_or_default();
+                let released = release_repository(
+                    &namespace,
+                    &repo.name_any(),
+                    &repo.spec.prefix,
+                    repo.annotations(),
+                    status.common.instance.as_ref(),
+                    ctx.attached.as_ref(),
+                )
+                .await;
+                if let Err(failure) = &released {
+                    // Said on the repository too, not only in an Event.
+                    weebo_kit_runtime::status::publish(
+                        &api,
+                        &ctx.recorder,
+                        super::FIELD_MANAGER,
+                        repo.as_ref(),
+                        &status.common.conditions,
+                        StatusUpdate {
+                            ready: &Err(failure.clone()),
+                            advisories: &[],
+                            fields: serde_json::Map::new(),
+                        },
+                    )
+                    .await?;
+                }
+                super::finalize(repo.as_ref(), &ctx, async {
+                    released.map_err(Error::Cleanup)
+                })
+                .await
+            }
+        }
+    })
+    .await
+    .map_err(|e| Error::Finalizer(Box::new(e)))
+}
+
+async fn apply(obj: Arc<Repository>, ctx: Arc<Ctx>) -> Result<Action, Error> {
     let namespace = obj.namespace().unwrap_or_default();
     let api: Api<Repository> = Api::namespaced(ctx.client.clone(), &namespace);
     let started = Instant::now();

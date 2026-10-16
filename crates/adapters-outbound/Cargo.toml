@@ -13,10 +13,13 @@ async-trait = { workspace = true }
 kube = { workspace = true }
 k8s-openapi = { workspace = true }
 serde_json = { workspace = true }
+serde = { workspace = true }
 tokio = { workspace = true }
 http = "1"
 base64 = { workspace = true }
 getrandom = "0.3"
+# Argon2id as `angos argon` hashes (spec 4.4).
+argon2 = { version = "0.5", features = ["std"] }
 weebo-kit-application = { workspace = true }
 # Angos 1.12.3's CEL engine, pinned to its version (spec 2.6): `task
 # angos:bump` moves it with Angos.

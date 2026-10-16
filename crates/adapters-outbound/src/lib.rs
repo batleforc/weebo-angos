@@ -8,11 +8,13 @@
 pub mod cel;
 pub mod cluster;
 pub mod instances;
+pub mod maintenance;
 pub mod repositories;
 
 pub use cel::CelInterpreterChecker;
-pub use cluster::{KubeClusterIssuer, KubeCredentials, RandomKeys};
+pub use cluster::{Argon2Hasher, KubeClusterIssuer, KubeCredentials, RandomKeys};
 pub use instances::LocalInstanceDirectory;
+pub use maintenance::{KubeJobs, KubeMaintenances};
 pub use repositories::KubeRepositories;
 use weebo_kit_adapters::WorkloadSettings;
 
@@ -30,5 +32,23 @@ pub fn workload_settings(allowed_images: Vec<String>) -> WorkloadSettings {
         owner_kind: "AngosLocalInstance".into(),
         credential_label: api::CREDENTIAL_LABEL.into(),
         allowed_images,
+    }
+}
+
+/// The settings of the `KubeOwnedObjects` writing an identity's own Secret:
+/// owned by the `AngosIdentity`.
+pub fn identity_settings() -> WorkloadSettings {
+    WorkloadSettings {
+        owner_kind: "AngosIdentity".into(),
+        ..workload_settings(Vec::new())
+    }
+}
+
+/// The settings of the `KubeOwnedObjects` writing a maintenance's Jobs:
+/// owned by the `AngosMaintenance`, Angos's images only.
+pub fn maintenance_settings(allowed_images: Vec<String>) -> WorkloadSettings {
+    WorkloadSettings {
+        owner_kind: "AngosMaintenance".into(),
+        ..workload_settings(allowed_images)
     }
 }

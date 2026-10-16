@@ -113,10 +113,9 @@ async fn run(
         RenderState::Invalid => Err(Failure::new(ReasonCode::InvalidSpec, message)),
         RenderState::Rendered => {
             report.rendered = true;
-            let current = render.generation == pass.generation;
-            let confirmed =
-                status.config_hash.is_some() && status.applied_config_hash == status.config_hash;
-            if current && confirmed {
+            // Confirmed by the instance itself, for this generation: never
+            // inferred from its hashes, which move in separate writes.
+            if render.applied_generation.is_some() && render.applied_generation == pass.generation {
                 Ok(format!("served by {bound} under {}/…", pass.spec.prefix))
             } else {
                 Err(Failure::new(
@@ -125,6 +124,56 @@ async fn run(
                 ))
             }
         }
+    }
+}
+
+/// A deleted repository's release (its finalizer, spec 6.6): its data goes
+/// at the instance's next prune, so it needs the annotation
+/// `angos.weebo.io/allow-data-deletion: "true"`; then it waits until every
+/// pod of its instance runs without it.
+pub async fn release_repository(
+    namespace: &str,
+    name: &str,
+    prefix: &str,
+    annotations: &BTreeMap<String, String>,
+    recorded: Option<&BoundInstance>,
+    instances: &dyn AttachedInstances,
+) -> Result<(), Failure> {
+    if annotations
+        .get(api::annotations::ALLOW_DATA_DELETION)
+        .map(String::as_str)
+        != Some("true")
+    {
+        return Err(Failure::new(
+            ReasonCode::DeletionNotAllowed,
+            format!(
+                "the data under {prefix}/ would be erased at the instance's next prune: annotate \
+                 the repository {}=\"true\" to confirm, or recreate it",
+                api::annotations::ALLOW_DATA_DELETION
+            ),
+        ));
+    }
+    let Some(bound) = recorded else {
+        return Ok(());
+    };
+    let Some(instance) = instances
+        .instance(bound)
+        .await
+        .map_err(|e| Failure::new(ReasonCode::KubernetesApiError, e))?
+    else {
+        return Ok(());
+    };
+    let status = instance.status.unwrap_or_default();
+    let key = format!("{namespace}/{name}");
+    let gone = !status.repositories.contains_key(&key);
+    let confirmed = status.applied_config_hash == status.config_hash;
+    if gone && confirmed {
+        Ok(())
+    } else {
+        Err(Failure::new(
+            ReasonCode::ConfigPropagating,
+            format!("waiting for {bound} to run without it"),
+        ))
     }
 }
 
@@ -165,7 +214,10 @@ mod tests {
             applied_config_hash: Some(if applied { "h" } else { "old" }.into()),
             ..Default::default()
         };
-        if let Some(render) = render {
+        if let Some(mut render) = render {
+            if !applied {
+                render.applied_generation = None;
+            }
             status.repositories.insert("team/app".into(), render);
         }
         instance.status = Some(status);
@@ -179,6 +231,7 @@ mod tests {
             message: Some("why".into()),
             conflict_with: (state == RenderState::Conflict).then(|| "team/team".into()),
             generation: Some(1),
+            applied_generation: Some(1),
         }
     }
 
@@ -235,6 +288,57 @@ mod tests {
         }
         let conflict = pass(&instance(Some(render(RenderState::Conflict)), true), spec()).await;
         assert_eq!(conflict.conflict_with.as_deref(), Some("team/team"));
+    }
+
+    #[tokio::test]
+    async fn a_deleted_repository_waits_for_consent_then_for_its_instance() {
+        let annotations = |allowed: bool| {
+            let mut a = BTreeMap::new();
+            if allowed {
+                a.insert(
+                    api::annotations::ALLOW_DATA_DELETION.to_string(),
+                    "true".to_string(),
+                );
+            }
+            a
+        };
+        let bound = BoundInstance::local("team", "reg");
+        let still = instance(Some(render(RenderState::Rendered)), true);
+        let refused = release_repository(
+            "team",
+            "app",
+            "team/app",
+            &annotations(false),
+            Some(&bound),
+            &still,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(refused.reason, ReasonCode::DeletionNotAllowed);
+        let waiting = release_repository(
+            "team",
+            "app",
+            "team/app",
+            &annotations(true),
+            Some(&bound),
+            &still,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(waiting.reason, ReasonCode::ConfigPropagating);
+        let gone = instance(None, true);
+        assert!(
+            release_repository(
+                "team",
+                "app",
+                "team/app",
+                &annotations(true),
+                Some(&bound),
+                &gone
+            )
+            .await
+            .is_ok()
+        );
     }
 
     #[tokio::test]

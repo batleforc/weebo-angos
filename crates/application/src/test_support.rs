@@ -98,6 +98,37 @@ impl KeyGenerator for CountingKeys {
         // 33 bytes once decoded: a valid key, distinct per call.
         format!("{:0>44}", format!("key{n}"))
     }
+
+    fn password(&self) -> String {
+        let mut n = self.0.lock().unwrap();
+        *n += 1;
+        format!("password-{n}")
+    }
+}
+
+/// A recognisable fake hash: `$argon2id$fake$<password>`.
+#[derive(Default)]
+pub struct FakeHasher;
+
+impl crate::ports::PasswordHasher for FakeHasher {
+    fn hash(&self, password: &str) -> String {
+        format!("$argon2id$fake${password}")
+    }
+}
+
+/// Identities bound to any instance, as set by the test.
+#[derive(Default)]
+pub struct FakeIdentities(pub Mutex<Vec<crate::identities::IdentityView>>);
+
+#[async_trait::async_trait]
+impl crate::ports::IdentityDirectory for FakeIdentities {
+    async fn bound_to(
+        &self,
+        _instance: &crate::ports::Owner,
+        _selector: &api::local_instance::RepositorySelector,
+    ) -> Result<Vec<crate::identities::IdentityView>, String> {
+        Ok(self.0.lock().unwrap().clone())
+    }
 }
 
 /// What was recorded, in order.

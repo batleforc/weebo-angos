@@ -1,4 +1,5 @@
-//! [`RepositoryDirectory`] on the Kubernetes API: the `AngosRepository`s in
+//! [`RepositoryDirectory`] and [`IdentityDirectory`] on the Kubernetes API:
+//! the `AngosRepository`s (and `AngosIdentity`s) in
 //! the operator's scope recording an instance in `status.instance` (their
 //! own controller binds them), kept only when the instance still accepts
 //! them — its `repositorySelector.selector` matches their labels, and they
@@ -7,9 +8,10 @@
 
 use std::collections::BTreeMap;
 
-use api::Repository;
 use api::local_instance::RepositorySelector;
-use application::ports::{Owner, RepositoryDirectory};
+use api::{Identity, Repository};
+use application::identities::IdentityView;
+use application::ports::{IdentityDirectory, Owner, RepositoryDirectory};
 use application::repositories::RepositoryView;
 use k8s_openapi::api::core::v1::Namespace;
 use kube::api::{Api, ListParams};
@@ -45,13 +47,34 @@ impl KubeRepositories {
     }
 }
 
+/// What the directory needs of a kind bound to an instance.
+trait Bound:
+    kube::Resource<DynamicType = (), Scope = k8s_openapi::NamespaceResourceScope>
+    + Clone
+    + std::fmt::Debug
+    + serde::de::DeserializeOwned
+    + Send
+    + Sync
+    + 'static
+{
+    fn bound(&self) -> Option<&BoundInstance>;
+}
+
+impl Bound for Repository {
+    fn bound(&self) -> Option<&BoundInstance> {
+        self.status.as_ref()?.common.instance.as_ref()
+    }
+}
+
+impl Bound for Identity {
+    fn bound(&self) -> Option<&BoundInstance> {
+        self.status.as_ref()?.common.instance.as_ref()
+    }
+}
+
 #[async_trait::async_trait]
 impl RepositoryDirectory for KubeRepositories {
-    async fn bound_to(
-        &self,
-        instance: &Owner,
-        selector: &RepositorySelector,
-    ) -> Result<Vec<RepositoryView>, String> {
+    async fn aiming_at(&self, instance: &Owner) -> Result<Vec<String>, String> {
         let api: Api<Repository> = match &self.watched_namespace {
             Some(ns) => Api::namespaced(self.client.clone(), ns),
             None => Api::all(self.client.clone()),
@@ -65,6 +88,101 @@ impl RepositoryDirectory for KubeRepositories {
             .await
             .map_err(|e| format!("listing AngosRepositories: {e}"))?;
         let bound = BoundInstance::local(instance.namespace.clone(), instance.name.clone());
+        Ok(listed
+            .items
+            .into_iter()
+            .filter(|repo| {
+                let namespace = repo.namespace().unwrap_or_default();
+                match repo.bound() {
+                    Some(b) => *b == bound,
+                    // Not bound yet: whatever it names, or this namespace's
+                    // instance by default.
+                    None => match &repo.spec.instance_ref {
+                        Some(r) => {
+                            r.name == instance.name
+                                && r.namespace.as_deref().unwrap_or(&namespace)
+                                    == instance.namespace
+                        }
+                        None => namespace == instance.namespace,
+                    },
+                }
+            })
+            .map(|repo| {
+                format!(
+                    "{}/{}",
+                    repo.namespace().unwrap_or_default(),
+                    repo.name_any()
+                )
+            })
+            .collect())
+    }
+
+    async fn bound_to(
+        &self,
+        instance: &Owner,
+        selector: &RepositorySelector,
+    ) -> Result<Vec<RepositoryView>, String> {
+        Ok(self
+            .bound::<Repository>(instance, selector)
+            .await?
+            .into_iter()
+            .map(|repo| RepositoryView {
+                namespace: repo.namespace().unwrap_or_default(),
+                name: repo.name_any(),
+                created: repo.metadata.creation_timestamp.as_ref().map(|t| t.0),
+                generation: repo.metadata.generation,
+                annotations: repo.annotations().clone(),
+                spec: repo.spec.clone(),
+                deleting: repo.metadata.deletion_timestamp.is_some(),
+            })
+            .collect())
+    }
+}
+
+#[async_trait::async_trait]
+impl IdentityDirectory for KubeRepositories {
+    async fn bound_to(
+        &self,
+        instance: &Owner,
+        selector: &RepositorySelector,
+    ) -> Result<Vec<IdentityView>, String> {
+        Ok(self
+            .bound::<Identity>(instance, selector)
+            .await?
+            .into_iter()
+            .map(|identity| IdentityView {
+                namespace: identity.namespace().unwrap_or_default(),
+                name: identity.name_any(),
+                created: identity.metadata.creation_timestamp.as_ref().map(|t| t.0),
+                username: identity
+                    .spec
+                    .username
+                    .clone()
+                    .unwrap_or_else(|| identity.name_any()),
+            })
+            .collect())
+    }
+}
+
+impl KubeRepositories {
+    async fn bound<K: Bound>(
+        &self,
+        instance: &Owner,
+        selector: &RepositorySelector,
+    ) -> Result<Vec<K>, String> {
+        let api: Api<K> = match &self.watched_namespace {
+            Some(ns) => Api::namespaced(self.client.clone(), ns),
+            None => Api::all(self.client.clone()),
+        };
+        let params = match &self.selector {
+            Some(s) => ListParams::default().labels_from(s),
+            None => ListParams::default(),
+        };
+        let listed = api
+            .list(&params)
+            .await
+            .map_err(|e| format!("listing {}: {e}", K::kind(&())))?;
+        let bound = BoundInstance::local(instance.namespace.clone(), instance.name.clone());
         let own: Option<Selector> = selector
             .selector
             .clone()
@@ -75,12 +193,7 @@ impl RepositoryDirectory for KubeRepositories {
         let mut labels_of: BTreeMap<String, Option<BTreeMap<String, String>>> = BTreeMap::new();
         let mut out = Vec::new();
         for repo in listed.items {
-            if repo
-                .status
-                .as_ref()
-                .and_then(|s| s.common.instance.as_ref())
-                != Some(&bound)
-            {
+            if repo.bound() != Some(&bound) {
                 continue;
             }
             let namespace = repo.namespace().unwrap_or_default();
@@ -103,14 +216,7 @@ impl RepositoryDirectory for KubeRepositories {
                     continue;
                 }
             }
-            out.push(RepositoryView {
-                namespace,
-                name: repo.name_any(),
-                created: repo.metadata.creation_timestamp.as_ref().map(|t| t.0),
-                generation: repo.metadata.generation,
-                annotations: repo.annotations().clone(),
-                spec: repo.spec.clone(),
-            });
+            out.push(repo);
         }
         Ok(out)
     }

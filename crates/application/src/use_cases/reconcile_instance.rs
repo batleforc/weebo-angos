@@ -76,6 +76,7 @@ pub struct InstancePorts<'a> {
     pub keys: &'a dyn KeyGenerator,
     pub ledger: &'a dyn StatusLedger,
     pub repositories: &'a dyn crate::ports::RepositoryDirectory,
+    pub identities: &'a dyn crate::ports::IdentityDirectory,
     pub cel: &'a dyn crate::ports::CelChecker,
 }
 
@@ -125,6 +126,8 @@ pub fn status_fields(status: &InstanceStatus) -> serde_json::Map<String, serde_j
         "lastRejectionTime",
         "rolledOutFor",
         "repositories",
+        "identities",
+        "releasedRepositories",
     ] {
         map.entry(key).or_insert(serde_json::Value::Null);
     }
@@ -330,8 +333,9 @@ async fn policies(
         .filter(|(_, r)| r.state == api::status::RenderState::Rendered)
         .map(|(key, _)| key.clone())
         .collect();
+    let previous = std::mem::take(&mut status.repositories);
+    let views: Vec<_> = views.into_iter().filter(|v| !v.released()).collect();
     let lost = crate::repositories::conflicts(&views, &in_service);
-    status.repositories.clear();
     for view in &views {
         let key = view.key();
         let mut render = api::status::RepositoryRender {
@@ -340,6 +344,7 @@ async fn policies(
             message: None,
             conflict_with: None,
             generation: view.generation,
+            applied_generation: previous.get(&key).and_then(|r| r.applied_generation),
         };
         if let Some(winner) = lost.get(&key) {
             render.state = api::status::RenderState::Conflict;
@@ -364,8 +369,90 @@ async fn policies(
         }
         status.repositories.insert(key, render);
     }
+    // What left the configuration: a prune waits after it (spec 6.6).
+    for (key, render) in &previous {
+        let still = status
+            .repositories
+            .get(key)
+            .is_some_and(|r| r.state == api::status::RenderState::Rendered);
+        if render.state == api::status::RenderState::Rendered && !still {
+            status
+                .released_repositories
+                .entry(key.clone())
+                .or_insert_with(|| pass.now.to_string());
+        }
+    }
+    let keep = SignedDuration::from_hours(2 * i64::from(spec.prune_lock.window_hours.max(24)));
+    status.released_repositories.retain(|key, at| {
+        !status.repositories.contains_key(key)
+            && at
+                .parse::<Timestamp>()
+                .is_ok_and(|at| pass.now.duration_since(at) < keep)
+    });
     if !warnings.is_empty() {
         advisories.push(advisory(ReasonCode::RuleMayFail, warnings.join("; ")));
+    }
+    identities(pass, ports, status, resolved).await
+}
+
+/// The identities bound to the instance rendered, or recorded as not.
+async fn identities(
+    pass: &InstancePass<'_>,
+    ports: &InstancePorts<'_>,
+    status: &mut InstanceStatus,
+    resolved: &mut Resolved,
+) -> Result<(), Failure> {
+    use api::status::{IdentityRender, RenderState};
+    let spec = pass.spec;
+    let views = ports
+        .identities
+        .bound_to(pass.owner, &spec.repository_selector)
+        .await
+        .map_err(|e| Failure::new(ReasonCode::KubernetesApiError, e))?;
+    let in_service: std::collections::BTreeSet<String> = status
+        .identities
+        .iter()
+        .filter(|(_, r)| r.state == RenderState::Rendered)
+        .map(|(key, _)| key.clone())
+        .collect();
+    let providers: std::collections::BTreeSet<String> = spec
+        .auth
+        .oidc
+        .iter()
+        .map(|p| p.name.clone())
+        .chain(spec.auth.kubernetes.iter().map(|k| k.name.clone()))
+        .collect();
+    let lost = crate::identities::conflicts(&views, &in_service, &providers);
+    let previous = std::mem::take(&mut status.identities);
+    for view in &views {
+        let key = view.key();
+        let render = if let Some((winner, why)) = lost.get(&key) {
+            crate::identities::refused(view, RenderState::Conflict, why.clone(), winner.clone())
+        } else {
+            match crate::identities::hash_of(view, ports.credentials).await {
+                Ok((hash, version)) => {
+                    resolved.identities.insert(view.username.clone(), hash);
+                    IdentityRender {
+                        username: view.username.clone(),
+                        state: RenderState::Rendered,
+                        version: Some(version),
+                        applied_version: previous.get(&key).and_then(|r| r.applied_version),
+                        message: None,
+                        conflict_with: None,
+                    }
+                }
+                Err(CredentialError::NotAllowed(m)) => {
+                    crate::identities::refused(view, RenderState::SecretNotAllowed, m, None)
+                }
+                Err(CredentialError::Kubernetes(m)) => {
+                    return Err(Failure::new(ReasonCode::KubernetesApiError, m));
+                }
+                Err(CredentialError::Missing(m)) => {
+                    crate::identities::refused(view, RenderState::SecretMissing, m, None)
+                }
+            }
+        };
+        status.identities.insert(key, render);
     }
     Ok(())
 }
@@ -994,6 +1081,18 @@ async fn run(
                 status.rejection_message.clone().unwrap_or_default()
             ),
         ));
+    }
+    // Every pod runs what was rendered this pass: what it holds is
+    // confirmed, for the identities' targets and the repositories' status.
+    for render in status.repositories.values_mut() {
+        if render.state == api::status::RenderState::Rendered {
+            render.applied_generation = render.generation;
+        }
+    }
+    for render in status.identities.values_mut() {
+        if render.state == api::status::RenderState::Rendered {
+            render.applied_version = render.version;
+        }
     }
     Ok(format!(
         "Angos {} serves {}",
