@@ -147,6 +147,15 @@ pub trait CelChecker: Send + Sync {
 /// in scope of the operator, from namespaces the instance accepts.
 #[async_trait::async_trait]
 pub trait RepositoryDirectory: Send + Sync {
+    /// Every repository in scope that is, or may become, the instance's:
+    /// bound to it, or not bound yet and naming it (or, without
+    /// `instanceRef`, in its namespace) — `namespace/name`. What a prune
+    /// must not run without (spec 6.6).
+    async fn aiming_at(&self, instance: &Owner) -> Result<Vec<String>, String> {
+        let _ = instance;
+        Ok(Vec::new())
+    }
+
     /// Those recording `instance` in `status.instance`, matching its
     /// `selector`, from its own namespace or one it accepts.
     async fn bound_to(

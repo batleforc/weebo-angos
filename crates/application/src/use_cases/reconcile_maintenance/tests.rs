@@ -60,6 +60,25 @@ struct World {
     logs: FakePodLogs,
     others: Others,
     ledger: FakeLedger,
+    repositories: Aiming,
+}
+
+#[derive(Default)]
+struct Aiming(Mutex<Vec<String>>);
+
+#[async_trait::async_trait]
+impl crate::ports::RepositoryDirectory for Aiming {
+    async fn bound_to(
+        &self,
+        _: &Owner,
+        _: &api::local_instance::RepositorySelector,
+    ) -> Result<Vec<crate::repositories::RepositoryView>, String> {
+        Ok(Vec::new())
+    }
+
+    async fn aiming_at(&self, _: &Owner) -> Result<Vec<String>, String> {
+        Ok(self.0.lock().unwrap().clone())
+    }
 }
 
 fn ready_instance(storage: serde_json::Value) -> LocalInstance {
@@ -104,6 +123,7 @@ impl World {
             logs: FakePodLogs::default(),
             others: Others::default(),
             ledger: FakeLedger::default(),
+            repositories: Aiming::default(),
         }
     }
 
@@ -124,6 +144,7 @@ impl World {
                 jobs: &self.jobs,
                 logs: &self.logs,
                 maintenances: &self.others,
+                repositories: &self.repositories,
                 ledger: &self.ledger,
             },
         )
@@ -314,4 +335,13 @@ async fn an_instance_without_a_reachable_store_is_refused() {
     *world.instances.0.lock().unwrap() = ready_instance(json!({"fs": {}}));
     assert_eq!(world.pass().await.outcome.reason(), ReasonCode::InvalidSpec);
     assert!(world.objects.names("Job").is_empty());
+}
+
+#[tokio::test]
+async fn a_prune_waits_for_a_repository_not_bound_yet() {
+    let mut world = World::new(json!({"task": "Prune"}));
+    *world.repositories.0.lock().unwrap() = vec!["team/new".into()];
+    let report = world.pass().await;
+    assert!(report.outcome.advisories[0].message.contains("team/new"));
+    assert_eq!(world.status.run_count, 0);
 }

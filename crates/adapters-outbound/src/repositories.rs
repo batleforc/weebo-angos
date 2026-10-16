@@ -74,6 +74,49 @@ impl Bound for Identity {
 
 #[async_trait::async_trait]
 impl RepositoryDirectory for KubeRepositories {
+    async fn aiming_at(&self, instance: &Owner) -> Result<Vec<String>, String> {
+        let api: Api<Repository> = match &self.watched_namespace {
+            Some(ns) => Api::namespaced(self.client.clone(), ns),
+            None => Api::all(self.client.clone()),
+        };
+        let params = match &self.selector {
+            Some(s) => ListParams::default().labels_from(s),
+            None => ListParams::default(),
+        };
+        let listed = api
+            .list(&params)
+            .await
+            .map_err(|e| format!("listing AngosRepositories: {e}"))?;
+        let bound = BoundInstance::local(instance.namespace.clone(), instance.name.clone());
+        Ok(listed
+            .items
+            .into_iter()
+            .filter(|repo| {
+                let namespace = repo.namespace().unwrap_or_default();
+                match repo.bound() {
+                    Some(b) => *b == bound,
+                    // Not bound yet: whatever it names, or this namespace's
+                    // instance by default.
+                    None => match &repo.spec.instance_ref {
+                        Some(r) => {
+                            r.name == instance.name
+                                && r.namespace.as_deref().unwrap_or(&namespace)
+                                    == instance.namespace
+                        }
+                        None => namespace == instance.namespace,
+                    },
+                }
+            })
+            .map(|repo| {
+                format!(
+                    "{}/{}",
+                    repo.namespace().unwrap_or_default(),
+                    repo.name_any()
+                )
+            })
+            .collect())
+    }
+
     async fn bound_to(
         &self,
         instance: &Owner,

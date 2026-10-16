@@ -44,6 +44,7 @@ pub struct MaintenancePorts<'a> {
     pub jobs: &'a dyn Jobs,
     pub logs: &'a dyn PodLogs,
     pub maintenances: &'a dyn MaintenanceDirectory,
+    pub repositories: &'a dyn crate::ports::RepositoryDirectory,
     pub ledger: &'a dyn StatusLedger,
 }
 
@@ -269,7 +270,17 @@ async fn run(
                 format!("the maintenance {other} writes to the store: one at a time"),
             ))
         } else if spec.task == Task::Prune {
-            crate::maintenance::prune_lock(&instance, pass.now)
+            let instance_owner = Owner {
+                namespace: bound.namespace.clone().unwrap_or_default(),
+                name: bound.name.clone(),
+                uid: instance.metadata.uid.clone().unwrap_or_default(),
+            };
+            let aiming = ports
+                .repositories
+                .aiming_at(&instance_owner)
+                .await
+                .map_err(|e| Failure::new(ReasonCode::KubernetesApiError, e))?;
+            crate::maintenance::prune_lock(&instance, &aiming, pass.now)
                 .map(|why| (ReasonCode::MaintenanceSkipped, format!("prune lock: {why}")))
         } else {
             None

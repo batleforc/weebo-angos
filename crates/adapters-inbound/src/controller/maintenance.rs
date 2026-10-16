@@ -97,6 +97,7 @@ async fn reconcile(obj: Arc<Maintenance>, ctx: Arc<Ctx>) -> Result<Action, Error
             jobs: ctx.jobs.as_ref(),
             logs: ctx.logs.as_ref(),
             maintenances: ctx.maintenances.as_ref(),
+            repositories: ctx.repositories.as_ref(),
             ledger: &ledger,
         },
     )

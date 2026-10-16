@@ -242,9 +242,19 @@ pub fn job(
     OwnedObject::of(&job, true)
 }
 
-/// Why a prune can't run now (spec 6.6), `None` when it may.
-pub fn prune_lock(instance: &LocalInstance, now: Timestamp) -> Option<String> {
+/// Why a prune can't run now (spec 6.6), `None` when it may. `aiming` are
+/// the repositories bound to the instance or about to be: each must be in
+/// its configuration.
+pub fn prune_lock(instance: &LocalInstance, aiming: &[String], now: Timestamp) -> Option<String> {
     let status = instance.status.clone().unwrap_or_default();
+    if let Some(key) = aiming
+        .iter()
+        .find(|key| !status.repositories.contains_key(*key))
+    {
+        return Some(format!(
+            "the repository {key} isn't rendered by the instance yet: its data would go"
+        ));
+    }
     if let Some((key, r)) = status
         .repositories
         .iter()
@@ -383,12 +393,21 @@ mod tests {
             ..Default::default()
         };
         instance.status = Some(status.clone());
-        assert_eq!(prune_lock(&instance, now), None);
+        assert_eq!(prune_lock(&instance, &[], now), None);
+        assert!(
+            prune_lock(&instance, &["team/new".to_string()], now)
+                .unwrap()
+                .contains("team/new")
+        );
         status
             .released_repositories
             .insert("team/old".into(), "2026-10-16T02:00:00Z".into());
         instance.status = Some(status.clone());
-        assert!(prune_lock(&instance, now).unwrap().contains("released"));
+        assert!(
+            prune_lock(&instance, &[], now)
+                .unwrap()
+                .contains("released")
+        );
         status.released_repositories.clear();
         status.repositories.insert(
             "team/app".into(),
@@ -402,10 +421,14 @@ mod tests {
             },
         );
         instance.status = Some(status.clone());
-        assert!(prune_lock(&instance, now).unwrap().contains("team/app"));
+        assert!(
+            prune_lock(&instance, &[], now)
+                .unwrap()
+                .contains("team/app")
+        );
         status.repositories.clear();
         status.applied_config_hash = Some("old".into());
         instance.status = Some(status);
-        assert!(prune_lock(&instance, now).is_some());
+        assert!(prune_lock(&instance, &[], now).is_some());
     }
 }
