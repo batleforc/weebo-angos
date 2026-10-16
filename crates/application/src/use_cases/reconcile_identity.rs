@@ -242,9 +242,9 @@ async fn run(
         }
         RenderState::Rendered => {}
     }
-    let confirmed = instance_status.config_hash.is_some()
-        && instance_status.applied_config_hash == instance_status.config_hash;
-    if render.version != Some(version) || !confirmed {
+    // The instance says which version its pods confirmed: never inferred
+    // from its hashes, which move in separate writes.
+    if render.applied_version != Some(version) {
         return Err(waiting(format!(
             "password version {version} waits for every pod of {bound} to accept it; the targets \
              keep the previous one"

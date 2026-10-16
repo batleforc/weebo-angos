@@ -809,3 +809,49 @@ async fn a_deleted_repository_stays_until_its_data_may_go() {
     assert!(!world.hot().contains("[repository.app"));
     assert!(world.status.released_repositories.contains_key("team/app"));
 }
+
+#[tokio::test]
+async fn an_identity_s_version_is_confirmed_only_once_the_pods_reload() {
+    let mut world = World::fs();
+    *world.identities.0.lock().unwrap() = vec![crate::identities::IdentityView {
+        namespace: "team".into(),
+        name: "ci".into(),
+        created: Some("2026-01-01T00:00:00Z".parse().unwrap()),
+        username: "ci".into(),
+    }];
+    let hash = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA";
+    world.credentials.insert(
+        "team",
+        "ci-angos-password",
+        &[("hash", hash), ("version", "1")],
+    );
+    let first = running(&mut world).await;
+    assert_eq!(first.status.identities["team/ci"].applied_version, Some(1));
+    world.pod("reg-1", "2026-10-16T09:00:00Z");
+    // A rotation: version 2 rendered and written, not confirmed.
+    world.credentials.insert(
+        "team",
+        "ci-angos-password",
+        &[
+            ("hash", "$argon2id$v=19$m=19456,t=2,p=1$c2FsdB$aGFzaB"),
+            ("version", "2"),
+        ],
+    );
+    let written = world.pass().await;
+    assert_eq!(reason(&written), ReasonCode::ConfigPropagating);
+    let ci = &written.status.identities["team/ci"];
+    assert_eq!((ci.version, ci.applied_version), (Some(2), Some(1)));
+    let at = world.written();
+    world.log(
+        "reg-1",
+        at + SignedDuration::from_secs(30),
+        "INFO",
+        W,
+        crate::reload::RELOADED,
+    );
+    let confirmed = world.pass().await;
+    assert_eq!(
+        confirmed.status.identities["team/ci"].applied_version,
+        Some(2)
+    );
+}

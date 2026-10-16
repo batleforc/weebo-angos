@@ -96,6 +96,7 @@ impl World {
                 username: "ci".into(),
                 state,
                 version: Some(version),
+                applied_version: confirmed.then_some(version),
                 message: Some("why".into()),
                 conflict_with: (state == RenderState::Conflict).then(|| "other/ci".into()),
             },

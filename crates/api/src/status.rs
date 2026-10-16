@@ -138,6 +138,10 @@ pub struct RepositoryRender {
     /// The `metadata.generation` rendered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<i64>,
+    /// The `metadata.generation` every pod of the instance confirmed
+    /// loading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_generation: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -163,6 +167,10 @@ pub struct IdentityRender {
     /// The password version rendered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<u64>,
+    /// The password version every pod of the instance confirmed loading:
+    /// what the identity's targets may get.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_version: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

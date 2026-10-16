@@ -398,6 +398,7 @@ mod tests {
                 message: None,
                 conflict_with: None,
                 generation: None,
+                applied_generation: None,
             },
         );
         instance.status = Some(status.clone());

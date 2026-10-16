@@ -101,6 +101,7 @@ pub fn refused(
         username: view.username.clone(),
         state,
         version: None,
+        applied_version: None,
         message: Some(message),
         conflict_with,
     }

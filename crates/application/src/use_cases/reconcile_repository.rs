@@ -113,10 +113,9 @@ async fn run(
         RenderState::Invalid => Err(Failure::new(ReasonCode::InvalidSpec, message)),
         RenderState::Rendered => {
             report.rendered = true;
-            let current = render.generation == pass.generation;
-            let confirmed =
-                status.config_hash.is_some() && status.applied_config_hash == status.config_hash;
-            if current && confirmed {
+            // Confirmed by the instance itself, for this generation: never
+            // inferred from its hashes, which move in separate writes.
+            if render.applied_generation.is_some() && render.applied_generation == pass.generation {
                 Ok(format!("served by {bound} under {}/…", pass.spec.prefix))
             } else {
                 Err(Failure::new(
@@ -215,7 +214,10 @@ mod tests {
             applied_config_hash: Some(if applied { "h" } else { "old" }.into()),
             ..Default::default()
         };
-        if let Some(render) = render {
+        if let Some(mut render) = render {
+            if !applied {
+                render.applied_generation = None;
+            }
             status.repositories.insert("team/app".into(), render);
         }
         instance.status = Some(status);
@@ -229,6 +231,7 @@ mod tests {
             message: Some("why".into()),
             conflict_with: (state == RenderState::Conflict).then(|| "team/team".into()),
             generation: Some(1),
+            applied_generation: Some(1),
         }
     }
 

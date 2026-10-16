@@ -240,6 +240,7 @@ async fn a_prune_is_skipped_while_a_repository_could_lose_its_data() {
             message: None,
             conflict_with: None,
             generation: None,
+            applied_generation: None,
         },
     );
     world.instances.0.lock().unwrap().status = Some(status);

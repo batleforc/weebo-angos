@@ -344,6 +344,7 @@ async fn policies(
             message: None,
             conflict_with: None,
             generation: view.generation,
+            applied_generation: previous.get(&key).and_then(|r| r.applied_generation),
         };
         if let Some(winner) = lost.get(&key) {
             render.state = api::status::RenderState::Conflict;
@@ -422,7 +423,7 @@ async fn identities(
         .chain(spec.auth.kubernetes.iter().map(|k| k.name.clone()))
         .collect();
     let lost = crate::identities::conflicts(&views, &in_service, &providers);
-    status.identities.clear();
+    let previous = std::mem::take(&mut status.identities);
     for view in &views {
         let key = view.key();
         let render = if let Some((winner, why)) = lost.get(&key) {
@@ -435,6 +436,7 @@ async fn identities(
                         username: view.username.clone(),
                         state: RenderState::Rendered,
                         version: Some(version),
+                        applied_version: previous.get(&key).and_then(|r| r.applied_version),
                         message: None,
                         conflict_with: None,
                     }
@@ -1079,6 +1081,18 @@ async fn run(
                 status.rejection_message.clone().unwrap_or_default()
             ),
         ));
+    }
+    // Every pod runs what was rendered this pass: what it holds is
+    // confirmed, for the identities' targets and the repositories' status.
+    for render in status.repositories.values_mut() {
+        if render.state == api::status::RenderState::Rendered {
+            render.applied_generation = render.generation;
+        }
+    }
+    for render in status.identities.values_mut() {
+        if render.state == api::status::RenderState::Rendered {
+            render.applied_version = render.version;
+        }
     }
     Ok(format!(
         "Angos {} serves {}",
