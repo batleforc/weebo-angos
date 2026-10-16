@@ -184,7 +184,7 @@ kubectl -n team-a patch angoslocalinstance registry --type merge \
   -p '{"spec":{"extraConfig":{"global":{"max_concurrent_cache_jobs":0}}}}'
 reason_is registry ConfigRejected
 message="$(field '{.status.rejectionMessage}')"
-printf '%s' "$message" | grep -q max_concurrent_cache_jobs || fail "rejection message: $message"
+printf '%s' "$message" | grep -q nonzero || fail "rejection message: $message"
 [ "$(kubectl -n team-a get secret registry-config -o jsonpath='{.data.config\.toml}')" = "$accepted" ] \
   || fail "the refused configuration was left in registry-config"
 # A pod that restarts now starts, on the accepted configuration.
