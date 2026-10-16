@@ -19,3 +19,6 @@ actionlint = "latest"
 shellcheck = "latest"
 hadolint = "latest"
 helm = "latest"
+# The kind e2e (deploy/e2e)
+kubectl = "latest"
+kind = "latest"

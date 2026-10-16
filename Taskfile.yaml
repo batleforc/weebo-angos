@@ -5,6 +5,8 @@ includes:
   # cog.toml, rendered from weebo-operator-kit's template (task kit:cog),
   # and the pins on the kit (task kit:sync).
   kit: ./.tasks/kit.yaml
+  # The kind e2e (deploy/e2e).
+  e2e: ./.tasks/e2e.yaml
   # The kit's shared tasks, pinned to the kit tag of Cargo.toml and to
   # their sha256: `task kit:sync` rewrites both. `task --offline` runs from
   # Task's cache.

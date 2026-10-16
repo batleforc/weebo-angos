@@ -102,6 +102,25 @@ specifiers = ["latest"]
 checksum = "sha256:86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb"
 url = "https://get.helm.sh/helm-v4.3.0-linux-amd64.tar.gz"
 
+[[tools.kind]]
+version = "0.33.0"
+backend = "aqua:kubernetes-sigs/kind"
+specifiers = ["latest"]
+
+[tools.kind."platforms.linux-x64"]
+checksum = "sha256:aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d"
+url = "https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64"
+url_api = "https://api.github.com/repos/kubernetes-sigs/kind/releases/assets/531396433"
+
+[[tools.kubectl]]
+version = "1.37.1"
+backend = "aqua:kubernetes/kubernetes/kubectl"
+specifiers = ["latest"]
+
+[tools.kubectl."platforms.linux-x64"]
+checksum = "sha256:65691ff77eb6fa44c908b77a1082c9f092c3b9733b5cefabec0d1104890e21a8"
+url = "https://dl.k8s.io/v1.37.1/bin/linux/amd64/kubectl"
+
 [[tools.rust]]
 version = "1.99.0"
 backend = "core:rust"

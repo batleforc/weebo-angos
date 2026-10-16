@@ -1,0 +1,8 @@
+# The smoke: an instance the operator reconciles on its own (until the
+# workload lands, M1, only its spec is checked).
+apiVersion: angos.weebo.io/v1alpha1
+kind: AngosLocalInstance
+metadata:
+  name: registry
+  namespace: team-a
+spec: {}
