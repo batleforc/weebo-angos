@@ -7,7 +7,8 @@
 //!   that doesn't exist yet is let through, the reconcile waits for it;
 //! - an `AngosRepository` is refused when its vocabulary or its rules
 //!   don't hold, or when its prefix overlaps a repository already bound to
-//!   its instance (spec 4.2).
+//!   its instance (spec 4.2);
+//! - an `AngosMaintenance` whose schedule doesn't read.
 
 use std::sync::Arc;
 
@@ -41,6 +42,16 @@ impl Admission for AngosAdmission {
         match kind {
             "AngosLocalInstance" => {}
             "AngosRepository" => return self.admit_repository(namespace, object).await,
+            "AngosMaintenance" => {
+                let maintenance: api::Maintenance =
+                    typed(object).map_err(|e| Denial::new(ReasonCode::InvalidSpec, e))?;
+                if let Some(schedule) = &maintenance.spec.schedule {
+                    application::cron::Schedule::parse(schedule).map_err(|e| {
+                        Denial::new(ReasonCode::InvalidSpec, format!("spec.schedule: {e}"))
+                    })?;
+                }
+                return Ok(());
+            }
             _ => {
                 return Err(Denial::new(
                     ReasonCode::InvalidSpec,

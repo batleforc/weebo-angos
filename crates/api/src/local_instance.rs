@@ -134,6 +134,11 @@ pub struct AngosLocalInstanceSpec {
     /// serves, and from which namespaces.
     #[serde(default, skip_serializing_if = "RepositorySelector::is_default")]
     pub repository_selector: RepositorySelector,
+    /// The prune lock (spec 6.6): no `AngosMaintenance` prune runs while a
+    /// repository was released less than `windowHours` ago (its data goes
+    /// at the next prune: time to notice and recreate it).
+    #[serde(default)]
+    pub prune_lock: PruneLock,
     /// Keys of Angos's configuration no typed field renders, merged last
     /// into the hot file. Checked by Angos only (advisory
     /// `ExtraConfigUsed`).
@@ -176,6 +181,7 @@ impl Default for AngosLocalInstanceSpec {
             tracing: None,
             reload: Reload::default(),
             repository_selector: RepositorySelector::default(),
+            prune_lock: PruneLock::default(),
             extra_config: ExtraConfig::new(),
         }
     }
@@ -316,6 +322,26 @@ pub struct NetworkPolicy {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(schema_with = "open_list")]
     pub egress_to: Vec<NetworkPolicyPeer>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PruneLock {
+    #[serde(default = "day_hours")]
+    #[schemars(range(min = 0))]
+    pub window_hours: u32,
+}
+
+fn day_hours() -> u32 {
+    24
+}
+
+impl Default for PruneLock {
+    fn default() -> Self {
+        Self {
+            window_hours: day_hours(),
+        }
+    }
 }
 
 /// Which `AngosRepository`s (and `AngosIdentity`s) the instance serves.

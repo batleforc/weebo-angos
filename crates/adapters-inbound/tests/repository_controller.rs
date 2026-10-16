@@ -60,6 +60,7 @@ async fn repositories_are_rendered_into_their_instance() {
     namespace(&client, "team").await;
     namespace(&client, "other").await;
     let (ctx, health) = common::ctx(&client, WatchScope::cluster(), Default::default());
+    let ctx_for_identities = ctx.clone();
     tokio::spawn(controller::local_instance::run(client.clone(), ctx.clone()));
     tokio::spawn(controller::repository::run(client.clone(), ctx));
     let pp = PostParams::default();
@@ -134,5 +135,45 @@ async fn repositories_are_rendered_into_their_instance() {
         .await
         .unwrap();
     reason_is(&other, "far", "InstanceNotAllowed").await;
+
+    // An identity: its password hashed into its own Secret, rendered; its
+    // targets wait for the pods (never confirmed here).
+    tokio::spawn(controller::identity::run(
+        client.clone(),
+        ctx_for_identities,
+    ));
+    let identities: Api<api::Identity> = Api::namespaced(client.clone(), "team");
+    identities
+        .create(&pp, &api::Identity::new("ci", Default::default()))
+        .await
+        .unwrap();
+    let secrets: Api<Secret> = Api::namespaced(client.clone(), "team");
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    loop {
+        let hot = secrets.get("reg-config").await.unwrap();
+        let hot = String::from_utf8(hot.data.unwrap()["config.toml"].0.clone()).unwrap();
+        if hot.contains("[auth.identity.ci]") {
+            assert!(
+                hot.contains("password = \"$argon2id$v=19$m=19456,t=2,p=1$"),
+                "{hot}"
+            );
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the identity was never rendered: {hot}"
+        );
+        tokio::time::sleep(POLL).await;
+    }
+    let ci = testkit::polling::wait_for(&identities, "ci", TIMEOUT, POLL, |i| {
+        let c = weebo_kit_api::status::ready(&i.status.as_ref()?.common.conditions)?;
+        Some((
+            c.reason.clone(),
+            i.status.as_ref()?.pending_password_version,
+        ))
+    })
+    .await;
+    assert_eq!(ci, ("ConfigPropagating".into(), Some(1)));
+    assert!(secrets.get_opt("ci-credentials").await.unwrap().is_none());
     assert_eq!(health.live(), Ok(()));
 }

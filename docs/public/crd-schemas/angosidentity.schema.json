@@ -1,0 +1,114 @@
+{
+  "apiVersion": "angos.weebo.io/v1alpha1",
+  "kind": "AngosIdentity",
+  "scope": "Namespaced",
+  "description": "A Basic identity of an Angos instance (`[auth.identity]`): a robot, a\nCI, a scanner. The operator generates its password (or adopts one),\nhashes it with Argon2id for the instance's configuration, and writes the\nclear password to its targets once every pod of the instance accepts\nit. Angos verifies a Basic password on every request (≈ 19 MiB and tens\nof milliseconds each): workloads should rather use their\nServiceAccount's token (`auth.kubernetes`).",
+  "properties": {
+    "adoptSecretRef": {
+      "description": "An existing password to keep (an identity moved from another tool),\nin a Secret of this namespace labelled\n`angos.weebo.io/credential: \"true\"`: read once, at creation.",
+      "nullable": true,
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "name"
+      ],
+      "type": "object"
+    },
+    "instanceRef": {
+      "description": "The instance: unset, the only one of this namespace. An instance of\nanother namespace must accept this one\n(`repositorySelector.namespaces`).",
+      "nullable": true,
+      "properties": {
+        "kind": {
+          "description": "The kind of instance a reference designates.",
+          "enum": [
+            "Instance",
+            "LocalInstance"
+          ],
+          "nullable": true,
+          "type": "string"
+        },
+        "name": {
+          "description": "`metadata.name` of the instance.",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Namespace of a `LocalInstance`. Defaults to this object's own;\nrequired on a cluster-scoped object. Another namespace's local\ninstance must share itself with this one (its `sharedWith`).",
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object",
+      "x-kubernetes-validations": [
+        {
+          "message": "namespace only applies to kind LocalInstance",
+          "rule": "!has(self.namespace) || !has(self.kind) || self.kind == 'LocalInstance'"
+        }
+      ]
+    },
+    "registryHost": {
+      "description": "The registry's public host (e.g. `registry.example.com`): adds a\n`.dockerconfigjson` key to the targets.",
+      "nullable": true,
+      "type": "string"
+    },
+    "rotationDays": {
+      "description": "A new password every this many days; the annotation\n`angos.weebo.io/rotate` (a new value) rotates it at once.",
+      "format": "uint32",
+      "minimum": 1,
+      "nullable": true,
+      "type": "integer"
+    },
+    "secretTargets": {
+      "description": "Where the credentials are written (keys `username`, `password`, and\n`.dockerconfigjson` with `registryHost`). Unset: the Secret\n`<name>-credentials` of this namespace.",
+      "items": {
+        "description": "Where an emitted secret (generated password or key, OAuth2 credentials,\naccess token) is written. A CR may list several targets — the same\nvalue is fanned out to each.",
+        "properties": {
+          "backend": {
+            "default": "kubernetes",
+            "description": "`kubernetes` (default) or `vault`. A Vault target reuses the Vault\nconnection (address, mount, auth) the instance configures, which it\nmust then do.",
+            "enum": [
+              "kubernetes",
+              "vault"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "Kubernetes: the `Secret` name. Vault: names the default path\n`<pathPrefix>/<namespace>/<name>` when `path` is unset.",
+            "type": "string"
+          },
+          "namespace": {
+            "description": "Kubernetes `Secret` namespace (Vault: the namespace segment of the\ndefault path). Defaults to the CR's own namespace; required on\ncluster-scoped CRs. A namespaced CR may only name its own namespace.",
+            "nullable": true,
+            "type": "string"
+          },
+          "path": {
+            "description": "Vault only: explicit KV v2 path under the instance's mount. It must\nstay under `<pathPrefix>/<namespace>/` (this object's namespace, or\nthe target's on a cluster-scoped object), unless the instance's\n`pathGrants` open it to this object.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "username": {
+      "description": "The username (`identity:<username>` in access rules). Default: the\nCR's name. Unique on the instance, never an OIDC provider's name.",
+      "nullable": true,
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "type": "string"
+    }
+  },
+  "type": "object"
+}

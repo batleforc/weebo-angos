@@ -2,7 +2,9 @@
 //! controller turns into a status patch and Events — always through a
 //! `ReasonCode`, never a free string.
 
+pub mod reconcile_identity;
 pub mod reconcile_instance;
+pub mod reconcile_maintenance;
 pub mod reconcile_repository;
 
 use domain::error::ReasonCode;

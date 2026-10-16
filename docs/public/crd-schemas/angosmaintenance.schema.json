@@ -1,0 +1,121 @@
+{
+  "apiVersion": "angos.weebo.io/v1alpha1",
+  "kind": "AngosMaintenance",
+  "scope": "Namespaced",
+  "description": "A task of Angos's CLI on an instance of this namespace (`angos scrub`,\n`prune`, `reconcile …`), once or on a schedule, run as a `Job` with the\ninstance's image and configuration. The operator schedules it: at most\none run per due time, never two writing tasks at once on an instance,\nnone while it rolls out — and a prune never while a repository could\nlose its data (spec 6.6). Every task runs as a dry run unless\n`params.dryRun` is `false`.",
+  "properties": {
+    "instanceRef": {
+      "description": "The instance, of this namespace: unset, its only one.",
+      "nullable": true,
+      "properties": {
+        "kind": {
+          "description": "The kind of instance a reference designates.",
+          "enum": [
+            "Instance",
+            "LocalInstance"
+          ],
+          "nullable": true,
+          "type": "string"
+        },
+        "name": {
+          "description": "`metadata.name` of the instance.",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Namespace of a `LocalInstance`. Defaults to this object's own;\nrequired on a cluster-scoped object. Another namespace's local\ninstance must share itself with this one (its `sharedWith`).",
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object",
+      "x-kubernetes-validations": [
+        {
+          "message": "namespace only applies to kind LocalInstance",
+          "rule": "!has(self.namespace) || !has(self.kind) || self.kind == 'LocalInstance'"
+        }
+      ]
+    },
+    "params": {
+      "default": {
+        "deleteUnknown": false,
+        "dryRun": true,
+        "force": false,
+        "uploadTimeout": "24h"
+      },
+      "properties": {
+        "concurrency": {
+          "description": "`--concurrency`.",
+          "format": "uint32",
+          "minimum": 1,
+          "nullable": true,
+          "type": "integer"
+        },
+        "deleteUnknown": {
+          "default": false,
+          "description": "Scrub: `--delete-unknown` (delete instead of quarantining).",
+          "type": "boolean"
+        },
+        "dryRun": {
+          "default": true,
+          "description": "`-d`: report only. **True unless set to false.**",
+          "type": "boolean"
+        },
+        "force": {
+          "default": false,
+          "description": "Reconcile scan/index: `--force`.",
+          "type": "boolean"
+        },
+        "uploadTimeout": {
+          "default": "24h",
+          "description": "Prune: `-u`, the age of the upload leftovers reclaimed.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "resources": {
+      "description": "The Job's resources (the tasks spawn up to 64 threads; `concurrency`\nbounds the work).",
+      "type": "object"
+    },
+    "schedule": {
+      "description": "A 5-field cron expression, in UTC (`15 * * * *`). Unset: one run.\nA time missed (the operator down) is not caught up.",
+      "nullable": true,
+      "type": "string"
+    },
+    "suspend": {
+      "default": false,
+      "description": "No run while true.",
+      "type": "boolean"
+    },
+    "task": {
+      "enum": [
+        "Scrub",
+        "Prune",
+        "ReconcileReplication",
+        "ReconcileScan",
+        "ReconcileIndex"
+      ],
+      "type": "string"
+    },
+    "timeoutSeconds": {
+      "default": 3600,
+      "description": "The Job's `activeDeadlineSeconds`.",
+      "format": "int64",
+      "minimum": 60,
+      "type": "integer"
+    },
+    "ttlSecondsAfterFinished": {
+      "default": 86400,
+      "description": "How long a finished Job is kept.",
+      "format": "int32",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "task"
+  ],
+  "type": "object"
+}

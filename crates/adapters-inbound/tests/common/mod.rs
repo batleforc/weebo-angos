@@ -35,6 +35,27 @@ pub fn ctx(client: &Client, scope: WatchScope, logs: Arc<FakePodLogs>) -> (Arc<C
             scope.watched_namespace().map(String::from),
             scope.selector().cloned(),
         )),
+        identities: Arc::new(KubeRepositories::new(client.clone()).with_scope(
+            scope.watched_namespace().map(String::from),
+            scope.selector().cloned(),
+        )),
+        identity_objects: Arc::new(KubeOwnedObjects::new(
+            client.clone(),
+            adapters_outbound::identity_settings(),
+        )),
+        hasher: Arc::new(adapters_outbound::Argon2Hasher),
+        maintenance_objects: Arc::new(KubeOwnedObjects::new(
+            client.clone(),
+            adapters_outbound::maintenance_settings(vec![api::angos::IMAGE_REPOSITORY.into()]),
+        )),
+        jobs: Arc::new(adapters_outbound::KubeJobs::new(client.clone())),
+        maintenances: Arc::new(adapters_outbound::KubeMaintenances::new(client.clone())),
+        secret_store: Arc::new(weebo_kit_adapters::K8sSecretStore::new(
+            client.clone(),
+            controller::FIELD_MANAGER,
+            api::MANAGED_BY,
+            "angos.weebo.io/owner",
+        )),
         attached: instances.clone(),
         cel: Arc::new(CelInterpreterChecker),
         issuer: Arc::new(FakeIssuer(Some("https://kubernetes.default.svc".into()))),

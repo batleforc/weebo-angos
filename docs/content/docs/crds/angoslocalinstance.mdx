@@ -60,6 +60,7 @@ spec:
 | `podLabels` | `object` | no |  |  |
 | `podSecurityContext` | `object` | no |  | Unset: non-root 65534 (the image's user), seccomp `RuntimeDefault`. |
 | `priorityClassName` | `string` | no |  |  |
+| `pruneLock` | `object` | no | `{"windowHours":24}` | The prune lock (spec 6.6): no `AngosMaintenance` prune runs while a repository was released less than `windowHours` ago (its data goes at the next prune: time to notice and recreate it). |
 | `reload` | `object` | no | `{"mode":"Hot","onUnconfirmed":"Wait","timeoutSeconds":180}` | How a new configuration reaches the pods. |
 | `replicas` | `integer` | no | `1` | One replica until the worker and the shared-store checks land. |
 | `repositorySelector` | `object` | no |  | Which `AngosRepository`s (and `AngosIdentity`s) the instance serves, and from which namespaces. |

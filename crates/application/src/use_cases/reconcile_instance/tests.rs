@@ -6,8 +6,8 @@ use weebo_kit_application::workload::{OwnedObjects, PodState};
 
 use super::*;
 use crate::test_support::{
-    CountingKeys, FakeCel, FakeCredentials, FakeIssuer, FakeLedger, FakeOwnedObjects, FakePodLogs,
-    FakeRepositories,
+    CountingKeys, FakeCel, FakeCredentials, FakeIdentities, FakeIssuer, FakeLedger,
+    FakeOwnedObjects, FakePodLogs, FakeRepositories,
 };
 use api::status::PodReloadState;
 
@@ -28,6 +28,7 @@ struct World {
     keys: CountingKeys,
     ledger: FakeLedger,
     repositories: FakeRepositories,
+    identities: FakeIdentities,
     cel: FakeCel,
 }
 
@@ -50,6 +51,7 @@ impl World {
             keys: CountingKeys::default(),
             ledger: FakeLedger::default(),
             repositories: FakeRepositories::default(),
+            identities: FakeIdentities::default(),
             cel: FakeCel::default(),
         }
     }
@@ -78,6 +80,7 @@ impl World {
                 keys: &self.keys,
                 ledger: &self.ledger,
                 repositories: &self.repositories,
+                identities: &self.identities,
                 cel: &self.cel,
             },
         )
@@ -672,6 +675,7 @@ fn repository(
         generation: Some(1),
         annotations: BTreeMap::new(),
         spec: serde_json::from_value(spec).unwrap(),
+        deleting: false,
     }
 }
 
@@ -744,4 +748,64 @@ async fn the_global_policy_is_checked_and_rendered_before_the_last_rule() {
     assert!(catalog < last);
     world.spec.global.access.jobs = vec!["anonymous".into()];
     assert_eq!(reason(&world.pass().await), ReasonCode::InvalidSpec);
+}
+
+#[tokio::test]
+async fn identities_are_rendered_with_their_hash() {
+    use api::status::RenderState;
+    let mut world =
+        World::new(json!({"storage": {"fs": {}}, "auth": {"kubernetes": {"audience": "angos"}}}));
+    let view =
+        |ns: &str, name: &str, created: &str, username: &str| crate::identities::IdentityView {
+            namespace: ns.into(),
+            name: name.into(),
+            created: Some(created.parse().unwrap()),
+            username: username.into(),
+        };
+    *world.identities.0.lock().unwrap() = vec![
+        view("team", "ci", "2026-01-01T00:00:00Z", "ci"),
+        view("other", "ci", "2026-01-02T00:00:00Z", "ci"),
+        view("team", "kube", "2026-01-03T00:00:00Z", "kube"),
+        view("team", "scanner", "2026-01-04T00:00:00Z", "scanner"),
+    ];
+    world.credentials.insert(
+        "team",
+        "ci-angos-password",
+        &[
+            ("hash", "$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA"),
+            ("version", "2"),
+        ],
+    );
+    let report = running(&mut world).await;
+    let ids = &report.status.identities;
+    assert_eq!(ids["team/ci"].state, RenderState::Rendered);
+    assert_eq!(ids["team/ci"].version, Some(2));
+    assert_eq!(ids["other/ci"].state, RenderState::Conflict);
+    assert_eq!(ids["team/kube"].state, RenderState::Conflict);
+    assert_eq!(ids["team/scanner"].state, RenderState::SecretMissing);
+    let hot = world.hot();
+    assert!(hot.contains("[auth.identity.ci]"), "{hot}");
+    assert!(!hot.contains("scanner"));
+}
+
+#[tokio::test]
+async fn a_deleted_repository_stays_until_its_data_may_go() {
+    let mut world = World::fs();
+    *world.repositories.0.lock().unwrap() = vec![repository(
+        "team",
+        "app",
+        "2026-01-01T00:00:00Z",
+        json!({"prefix": "app"}),
+    )];
+    running(&mut world).await;
+    world.repositories.0.lock().unwrap()[0].deleting = true;
+    world.pass().await;
+    assert!(world.hot().contains("[repository.app"));
+    assert!(world.status.released_repositories.is_empty());
+    world.repositories.0.lock().unwrap()[0]
+        .annotations
+        .insert(annotations::ALLOW_DATA_DELETION.into(), "true".into());
+    world.pass().await;
+    assert!(!world.hot().contains("[repository.app"));
+    assert!(world.status.released_repositories.contains_key("team/app"));
 }

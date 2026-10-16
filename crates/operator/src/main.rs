@@ -9,13 +9,13 @@ use adapters_inbound::controller::Settings;
 use adapters_inbound::controller::{self, Ctx, Shutdown};
 use adapters_inbound::webhook;
 use adapters_outbound::{
-    CelInterpreterChecker, KubeClusterIssuer, KubeCredentials, KubeRepositories,
-    LocalInstanceDirectory, RandomKeys,
+    Argon2Hasher, CelInterpreterChecker, KubeClusterIssuer, KubeCredentials, KubeJobs,
+    KubeMaintenances, KubeRepositories, LocalInstanceDirectory, RandomKeys,
 };
 use api::LocalInstance;
 use kube::Client;
 use kube::runtime::events::{Recorder, Reporter};
-use weebo_kit_adapters::{KubeOwnedObjects, KubePodLogs};
+use weebo_kit_adapters::{K8sSecretStore, KubeOwnedObjects, KubePodLogs};
 use weebo_kit_runtime::store::spawn_reflector;
 use weebo_kit_runtime::{Health, WatchScope, leader, telemetry, webhook_server};
 
@@ -64,6 +64,8 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     let scope = WatchScope::from_env()?;
     scope.ensure::<LocalInstance>()?;
     scope.ensure::<api::Repository>()?;
+    scope.ensure::<api::Identity>()?;
+    scope.ensure::<api::Maintenance>()?;
     tracing::info!(
         namespace = ?scope.watched_namespace(),
         selector = ?scope.selector(),
@@ -118,10 +120,28 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
         instances: instances.clone(),
         objects: Arc::new(KubeOwnedObjects::new(
             client.clone(),
-            adapters_outbound::workload_settings(allowed_images),
+            adapters_outbound::workload_settings(allowed_images.clone()),
         )),
         logs: Arc::new(KubePodLogs::new(client.clone())),
         credentials,
+        identities: repositories.clone(),
+        identity_objects: Arc::new(KubeOwnedObjects::new(
+            client.clone(),
+            adapters_outbound::identity_settings(),
+        )),
+        hasher: Arc::new(Argon2Hasher),
+        maintenance_objects: Arc::new(KubeOwnedObjects::new(
+            client.clone(),
+            adapters_outbound::maintenance_settings(allowed_images.clone()),
+        )),
+        jobs: Arc::new(KubeJobs::new(client.clone())),
+        maintenances: Arc::new(KubeMaintenances::new(client.clone())),
+        secret_store: Arc::new(K8sSecretStore::new(
+            client.clone(),
+            controller::FIELD_MANAGER,
+            api::MANAGED_BY,
+            "angos.weebo.io/owner",
+        )),
         repositories,
         attached: instances.clone(),
         cel,
@@ -166,6 +186,8 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     tokio::join!(
         controller::local_instance::run(client.clone(), ctx.clone()),
         controller::repository::run(client.clone(), ctx.clone()),
+        controller::identity::run(client.clone(), ctx.clone()),
+        controller::maintenance::run(client.clone(), ctx.clone()),
     );
     // Every controller returns once the shutdown signal arrived and its
     // in-flight reconciles finished: hand the lease over right away

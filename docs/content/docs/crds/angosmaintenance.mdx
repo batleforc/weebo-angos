@@ -1,0 +1,56 @@
+---
+title: AngosMaintenance
+description: >-
+  A task of Angos's CLI on an instance of this namespace (angos scrub, prune,
+  reconcile …), once or on a schedule, run as a Job with the instance's image
+  and configuration.
+full: true
+---
+
+- **API version:** `angos.weebo.io/v1alpha1`
+- **Scope:** Namespaced
+- **Short names:** `amaint`
+- **Guide:** [Install via Helm](/docs/guides/install)
+
+A task of Angos's CLI on an instance of this namespace (`angos scrub`,
+`prune`, `reconcile …`), once or on a schedule, run as a `Job` with the
+instance's image and configuration. The operator schedules it: at most
+one run per due time, never two writing tasks at once on an instance,
+none while it rolls out — and a prune never while a repository could
+lose its data (spec 6.6). Every task runs as a dry run unless
+`params.dryRun` is `false`.
+
+## Example
+
+```yaml
+apiVersion: angos.weebo.io/v1alpha1
+kind: AngosMaintenance
+metadata:
+  name: my-maintenance
+  namespace: team-a
+spec:
+  task: Prune
+  schedule: 15 * * * *
+  params:
+    dryRun: true
+    uploadTimeout: 24h
+```
+
+## Spec fields
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `instanceRef` | `object` | no |  | The instance, of this namespace: unset, its only one. |
+| `params` | `object` | no | `{"deleteUnknown":false,"dryRun":true,"force":false,"uploadTimeout":"24h"}` |  |
+| `resources` | `object` | no |  | The Job's resources (the tasks spawn up to 64 threads; `concurrency` bounds the work). |
+| `schedule` | `string` | no |  | A 5-field cron expression, in UTC (`15 * * * *`). Unset: one run. A time missed (the operator down) is not caught up. |
+| `suspend` | `boolean` | no | `false` | No run while true. |
+| `task` | `string` | yes |  |  |
+| `timeoutSeconds` | `integer` | no | `3600` | The Job's `activeDeadlineSeconds`. |
+| `ttlSecondsAfterFinished` | `integer` | no | `86400` | How long a finished Job is kept. |
+
+## Build a manifest
+
+Answer the questions and fill in the fields: the YAML preview updates as you type, ready to copy or download and `kubectl apply`.
+
+<CrdForm kind="AngosMaintenance" />

@@ -36,7 +36,9 @@ pub use weebo_kit_runtime::Shutdown;
 /// liveness.
 pub use weebo_kit_runtime::controller::{controller, drive};
 
+pub mod identity;
 pub mod local_instance;
+pub mod maintenance;
 pub mod repository;
 
 /// Field manager of the status patches, meter and Event reporter name.
@@ -62,6 +64,18 @@ pub struct Ctx {
     pub keys: Arc<dyn KeyGenerator>,
     /// The repositories bound to an instance.
     pub repositories: Arc<dyn application::ports::RepositoryDirectory>,
+    /// The identities bound to an instance.
+    pub identities: Arc<dyn application::ports::IdentityDirectory>,
+    /// An identity's own Secret (owner kind `AngosIdentity`).
+    pub identity_objects: Arc<dyn OwnedObjects>,
+    /// Argon2id.
+    pub hasher: Arc<dyn application::ports::PasswordHasher>,
+    /// Where identities write their credentials.
+    pub secret_store: Arc<dyn weebo_kit_application::ports::SecretStore>,
+    /// A maintenance's Jobs (owner kind `AngosMaintenance`).
+    pub maintenance_objects: Arc<dyn OwnedObjects>,
+    pub jobs: Arc<dyn application::ports::Jobs>,
+    pub maintenances: Arc<dyn application::ports::MaintenanceDirectory>,
     /// The instances a repository may bind to.
     pub attached: Arc<dyn application::ports::AttachedInstances>,
     /// Angos's CEL engine.

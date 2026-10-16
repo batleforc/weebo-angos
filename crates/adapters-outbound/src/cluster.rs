@@ -122,11 +122,58 @@ impl KeyGenerator for RandomKeys {
         getrandom::fill(&mut key).expect("the OS provides randomness");
         base64::engine::general_purpose::STANDARD.encode(key)
     }
+
+    fn password(&self) -> String {
+        let mut bytes = [0u8; 32];
+        getrandom::fill(&mut bytes).expect("the OS provides randomness");
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+    }
+}
+
+/// Argon2id v0x13, m=19456 KiB, t=2, p=1, a 16-byte random salt: what
+/// `angos argon` writes (`src/command/argon/mod.rs`).
+pub struct Argon2Hasher;
+
+impl application::ports::PasswordHasher for Argon2Hasher {
+    fn hash(&self, password: &str) -> String {
+        use argon2::password_hash::{PasswordHasher as _, SaltString, rand_core::OsRng};
+        let params = argon2::Params::new(19_456, 2, 1, None).expect("Angos's parameters are valid");
+        let argon =
+            argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
+        argon
+            .hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
+            .expect("hashing a password")
+            .to_string()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hashes_verify_as_angos_does() {
+        use application::ports::PasswordHasher as _;
+        use argon2::password_hash::{PasswordHash, PasswordVerifier};
+        let hash = Argon2Hasher.hash("s3cr3t");
+        assert!(
+            hash.starts_with("$argon2id$v=19$m=19456,t=2,p=1$"),
+            "{hash}"
+        );
+        // Angos checks with `Argon2::default()`, the hash's own params.
+        let parsed = PasswordHash::new(&hash).unwrap();
+        assert!(
+            argon2::Argon2::default()
+                .verify_password(b"s3cr3t", &parsed)
+                .is_ok()
+        );
+        assert!(
+            argon2::Argon2::default()
+                .verify_password(b"other", &parsed)
+                .is_err()
+        );
+        assert_eq!(RandomKeys.password().len(), 43);
+    }
 
     #[test]
     fn keys_are_32_random_bytes() {

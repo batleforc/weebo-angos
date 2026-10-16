@@ -85,6 +85,24 @@ pub trait ClusterIssuer: Send + Sync {
 pub trait KeyGenerator: Send + Sync {
     /// A token-service key: 32 random bytes, base64.
     fn token_key(&self) -> String;
+    /// An identity's password: 32 random bytes, base64url.
+    fn password(&self) -> String;
+}
+
+/// Argon2id as `angos argon` hashes (v0x13, m=19456, t=2, p=1): the PHC
+/// string the configuration holds.
+pub trait PasswordHasher: Send + Sync {
+    fn hash(&self, password: &str) -> String;
+}
+
+/// The `AngosIdentity`s bound to an instance, as [`RepositoryDirectory`].
+#[async_trait::async_trait]
+pub trait IdentityDirectory: Send + Sync {
+    async fn bound_to(
+        &self,
+        instance: &Owner,
+        selector: &api::local_instance::RepositorySelector,
+    ) -> Result<Vec<crate::identities::IdentityView>, String>;
 }
 
 /// Where a reconcile records status fields right after the write they
@@ -150,4 +168,30 @@ pub trait AttachedInstances: Send + Sync {
         recorded: Option<&BoundInstance>,
     ) -> Result<BoundInstance, InstanceError>;
     async fn instance(&self, bound: &BoundInstance) -> Result<Option<api::LocalInstance>, String>;
+}
+
+/// Where a maintenance's `Job` stands.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct JobState {
+    pub active: bool,
+    pub succeeded: bool,
+    pub failed: bool,
+    /// Stopped by its `activeDeadlineSeconds`.
+    pub deadline_exceeded: bool,
+    /// Its pod, for the log.
+    pub pod: Option<String>,
+    /// Its container's exit code, once terminated.
+    pub exit_code: Option<i32>,
+}
+
+/// The maintenances' `Job`s.
+#[async_trait::async_trait]
+pub trait Jobs: Send + Sync {
+    async fn job(&self, namespace: &str, name: &str) -> Result<Option<JobState>, String>;
+}
+
+/// The maintenances of a namespace (the write lock looks at the others).
+#[async_trait::async_trait]
+pub trait MaintenanceDirectory: Send + Sync {
+    async fn in_namespace(&self, namespace: &str) -> Result<Vec<api::Maintenance>, String>;
 }

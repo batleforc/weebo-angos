@@ -16,12 +16,16 @@ versions: [v1alpha1]
 kinds:
   - angoslocalinstances
   - angosrepositories
+  - angosidentities
+  - angosmaintenances
 # The namespaced kinds — all of them, the operator has no cluster-scoped
 # kind: what a team may manage (rbac.namespacedExample), and the watch
 # Role's (watch.namespace).
 namespacedKinds:
   - angoslocalinstances
   - angosrepositories
+  - angosidentities
+  - angosmaintenances
 # The operator reads and writes Secrets in every namespace that has an
 # instance, also limited to one namespace: said explicitly.
 clusterSecrets: true
@@ -31,6 +35,7 @@ clusterSecrets: true
 admitted:
   - angoslocalinstances
   - angosrepositories
+  - angosmaintenances
 # Cluster-wide only: the namespaced rules below, and the labels of the
 # namespaces repositories come from (repositorySelector.namespaces.from:
 # Selector). Limited to one namespace, none of them: they go to

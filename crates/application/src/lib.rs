@@ -3,6 +3,9 @@
 //! `adapters-outbound`, `operator::main` injects them.
 
 pub mod admission;
+pub mod cron;
+pub mod identities;
+pub mod maintenance;
 pub mod ports;
 pub mod reload;
 pub mod render;
