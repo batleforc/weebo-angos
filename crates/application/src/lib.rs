@@ -3,7 +3,10 @@
 //! `adapters-outbound`, `operator::main` injects them.
 
 pub mod ports;
+pub mod reload;
+pub mod render;
 pub mod use_cases;
+pub mod workload;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;

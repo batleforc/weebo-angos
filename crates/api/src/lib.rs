@@ -6,6 +6,7 @@
 //! the CRD's title); the workspace uses them through short re-exports
 //! ([`LocalInstance`]).
 
+pub mod config;
 pub mod local_instance;
 pub mod status;
 
@@ -63,4 +64,4 @@ pub mod angos {
 }
 
 pub use local_instance::LocalInstance;
-pub use status::Status;
+pub use status::{InstanceStatus, Status};

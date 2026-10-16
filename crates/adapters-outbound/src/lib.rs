@@ -5,8 +5,10 @@
 //! ([`LocalInstanceDirectory`]) and the settings tying the kit's adapters
 //! to `AngosLocalInstance` ([`workload_settings`]).
 
+pub mod cluster;
 pub mod instances;
 
+pub use cluster::{KubeClusterIssuer, KubeCredentials, RandomKeys};
 pub use instances::LocalInstanceDirectory;
 use weebo_kit_adapters::WorkloadSettings;
 

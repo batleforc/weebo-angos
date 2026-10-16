@@ -12,8 +12,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use adapters_inbound::controller::{self, Ctx, Shutdown};
-use adapters_outbound::LocalInstanceDirectory;
+use adapters_inbound::controller::{self, Ctx};
 use api::LocalInstance;
 use api::local_instance::LocalInstanceSpec;
 use k8s_openapi::api::core::v1::Namespace;
@@ -21,7 +20,6 @@ use k8s_openapi::api::rbac::v1::{PolicyRule, Role, RoleBinding, RoleRef, Subject
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
 use kube::Client;
 use kube::api::{Api, ObjectMeta, PostParams};
-use kube::runtime::events::{Recorder, Reporter};
 use testkit::envtest::EnvTestCluster;
 use weebo_kit_api::BoundInstance;
 use weebo_kit_runtime::{Health, WatchScope};
@@ -48,7 +46,30 @@ fn kind_rules(kinds: &[&str]) -> Vec<PolicyRule> {
 }
 
 fn secrets_and_events() -> Vec<PolicyRule> {
-    vec![
+    let rule = |group: &str, resources: &[&str], verbs: &[&str]| PolicyRule {
+        api_groups: Some(vec![group.into()]),
+        resources: Some(resources.iter().map(|r| r.to_string()).collect()),
+        verbs: verbs.iter().map(|v| v.to_string()).collect(),
+        ..Default::default()
+    };
+    let write = ["get", "list", "watch", "create", "patch", "delete"];
+    // The chart's `operator.namespacedRules` (templates/_params.tpl).
+    let mut rules = vec![
+        rule("apps", &["deployments"], &write),
+        rule("apps", &["replicasets"], &["get", "list", "watch"]),
+        rule(
+            "",
+            &["services", "serviceaccounts", "persistentvolumeclaims"],
+            &write,
+        ),
+        rule("policy", &["poddisruptionbudgets"], &write),
+        rule("networking.k8s.io", &["networkpolicies"], &write),
+        rule("batch", &["jobs"], &write),
+        rule("", &["pods"], &["get", "list", "watch"]),
+        rule("", &["pods/log"], &["get"]),
+        rule("", &["configmaps"], &["get", "list", "watch"]),
+    ];
+    rules.extend(vec![
         PolicyRule {
             api_groups: Some(vec!["".into()]),
             resources: Some(vec!["secrets".into()]),
@@ -63,7 +84,8 @@ fn secrets_and_events() -> Vec<PolicyRule> {
             verbs: vec!["create".into(), "patch".into()],
             ..Default::default()
         },
-    ]
+    ]);
+    rules
 }
 
 fn meta(name: &str, namespace: Option<&str>) -> ObjectMeta {
@@ -143,32 +165,17 @@ fn labelled<K: kube::Resource>(mut object: K, labels: &[(&str, &str)]) -> K {
 }
 
 fn local_instance(name: &str) -> LocalInstance {
-    LocalInstance::new(name, LocalInstanceSpec::default())
+    let mut spec = LocalInstanceSpec::default();
+    spec.storage.fs = Some(Default::default());
+    LocalInstance::new(name, spec)
 }
+
+mod common;
 
 /// The operator's context, as `operator::main` builds it for `scope`, on
 /// the operator's own (RBAC-limited) client.
 fn ctx(operator: &Client, scope: WatchScope) -> (Arc<Ctx>, Arc<Health>) {
-    let health = Arc::new(Health::default());
-    let instances = Arc::new(LocalInstanceDirectory::new(operator.clone()).with_scope(
-        scope.watched_namespace().map(String::from),
-        scope.selector().cloned(),
-    ));
-    let ctx = Arc::new(Ctx {
-        client: operator.clone(),
-        instances,
-        recorder: Recorder::new(
-            operator.clone(),
-            Reporter {
-                controller: controller::FIELD_MANAGER.into(),
-                instance: None,
-            },
-        ),
-        shutdown: Shutdown::never(),
-        health: health.clone(),
-        scope,
-    });
-    (ctx, health)
+    common::ctx(operator, scope, Default::default())
 }
 
 /// `Ready`'s status and reason, once there is one.
@@ -236,8 +243,9 @@ async fn a_namespaced_operator_runs_on_one_role_and_sees_only_its_instances() {
         .unwrap();
 
     // In scope: reconciled with the namespaced RBAC alone.
+    // No kubelet: its objects are written, its pods never become ready.
     let main = testkit::polling::wait_for(&team_a, "main", TIMEOUT, POLL, ready).await;
-    assert_eq!(main.0, "True");
+    assert_eq!(main, ("False".into(), "WorkloadNotReady".into()));
     // The directory resolves a CR of the namespace to its only instance in
     // scope (the other shard's is not a candidate).
     assert_eq!(

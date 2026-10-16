@@ -4,8 +4,601 @@
   "scope": "Namespaced",
   "description": "An Angos registry the operator runs in this namespace: its\n`Deployment`, its configuration (rendered from this spec, its\nrepositories and identities) and the objects around them. `Ready` tells\nwhether its pods run the desired configuration.",
   "properties": {
+    "affinity": {
+      "type": "object"
+    },
+    "auth": {
+      "default": {},
+      "description": "`[auth]`: who may authenticate.",
+      "properties": {
+        "kubernetes": {
+          "description": "The cluster's ServiceAccount tokens as an OIDC provider (workloads\npull with a projected token).",
+          "nullable": true,
+          "properties": {
+            "audience": {
+              "description": "The audience workload tokens must be issued for.",
+              "type": "string"
+            },
+            "issuer": {
+              "description": "The cluster's ServiceAccount issuer. Unset: read once by the\noperator from the API server's discovery (required when the\noperator is limited to one namespace).",
+              "nullable": true,
+              "type": "string"
+            },
+            "jwksUri": {
+              "description": "Default: `https://kubernetes.default.svc/openid/v1/jwks`, read with\nthe instance's own account token. That account must be bound to\n`system:service-account-issuer-discovery` (not done by the\noperator).",
+              "nullable": true,
+              "type": "string"
+            },
+            "name": {
+              "default": "kube",
+              "description": "The provider's name in `auth.oidc` and in access rules\n(`namespace:` and `serviceaccount:` subjects).",
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "audience"
+          ],
+          "type": "object"
+        },
+        "oidc": {
+          "description": "`[auth.oidc.<name>]`: OIDC providers whose tokens Angos accepts.",
+          "items": {
+            "properties": {
+              "allowedAlgorithms": {
+                "description": "`allowed_algorithms`. Angos: `RS256`.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "audience": {
+                "description": "`required_audience`: the audience a token must carry.",
+                "nullable": true,
+                "type": "string"
+              },
+              "audienceFrom": {
+                "description": "A key of a `Secret` in the referencing CR's own namespace.",
+                "nullable": true,
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "key",
+                  "name"
+                ],
+                "type": "object"
+              },
+              "clockSkewTolerance": {
+                "format": "uint64",
+                "minimum": 0,
+                "nullable": true,
+                "type": "integer"
+              },
+              "httpRequestTimeoutSecs": {
+                "format": "uint64",
+                "minimum": 0,
+                "nullable": true,
+                "type": "integer"
+              },
+              "issuer": {
+                "description": "The issuer, compared **exactly** with the one the provider\nadvertises (trailing slash included).",
+                "nullable": true,
+                "type": "string"
+              },
+              "issuerFrom": {
+                "description": "The issuer from a Secret of the namespace (e.g. the `AUTHENTIK_URL`\na weebo-authentik application writes), labelled\n`angos.weebo.io/credential: \"true\"`.",
+                "nullable": true,
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "key",
+                  "name"
+                ],
+                "type": "object"
+              },
+              "jwksRefreshInterval": {
+                "format": "uint64",
+                "minimum": 0,
+                "nullable": true,
+                "type": "integer"
+              },
+              "jwksRefreshTimeoutSecs": {
+                "format": "uint64",
+                "minimum": 0,
+                "nullable": true,
+                "type": "integer"
+              },
+              "jwksUri": {
+                "description": "`jwks_uri`: unset, discovered from the issuer.",
+                "nullable": true,
+                "type": "string"
+              },
+              "name": {
+                "description": "The provider's key: `identity.oidc.provider_name` in access rules,\nand never an identity's username.",
+                "pattern": "^[A-Za-z0-9_-]+$",
+                "type": "string"
+              },
+              "requiredClaims": {
+                "description": "`required_claims`: claims a token must carry (non-null).",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object",
+            "x-kubernetes-validations": [
+              {
+                "message": "an OIDC provider sets issuer or issuerFrom",
+                "rule": "has(self.issuer) != has(self.issuerFrom)"
+              },
+              {
+                "message": "an OIDC provider sets audience or audienceFrom: without one, Angos accepts any audience",
+                "rule": "has(self.audience) != has(self.audienceFrom)"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "tokenService": {
+          "description": "`[auth.token_service]`: the tokens `docker login` gets from\n`/token`.",
+          "nullable": true,
+          "properties": {
+            "keySecretRef": {
+              "description": "The signing key (base64, at least 32 bytes decoded). Unset: the\noperator generates one in `<instance>-token-key`; the annotation\n`angos.weebo.io/rotate` changes it — every token is then invalid.",
+              "nullable": true,
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "name"
+              ],
+              "type": "object"
+            },
+            "realm": {
+              "description": "`realm`: the public URL of `/token`, `https://<host>/token`\n(required: Angos would derive it from the request otherwise, wrong\nbehind an ingress).",
+              "pattern": "^https?://[^/]+(/.*)?/token$",
+              "type": "string"
+            },
+            "ttlSecs": {
+              "description": "`ttl_secs` of a token, 1 to 86400. Angos: 3600.",
+              "format": "uint64",
+              "maximum": 86400,
+              "minimum": 1,
+              "nullable": true,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "realm"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "cache": {
+      "description": "`[cache]`: unset, Angos caches in memory.",
+      "nullable": true,
+      "properties": {
+        "redis": {
+          "description": "`[cache.redis]`: a Redis or Valkey the operator doesn't create.",
+          "properties": {
+            "keyPrefix": {
+              "description": "`key_prefix` of every key Angos writes.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "urlSecretRef": {
+              "description": "The `redis://` URL (credentials included), in a Secret of the\nnamespace labelled `angos.weebo.io/credential: \"true\"`.",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "keyPrefix",
+            "urlSecretRef"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "redis"
+      ],
+      "type": "object"
+    },
+    "env": {
+      "description": "Rarely needed (Angos reads no secret from its environment). Secrets\nread here must be labelled `angos.weebo.io/credential: \"true\"`;\n`RUST_LOG` is the operator's (`logLevel`).",
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "envFrom": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "extraConfig": {
+      "description": "Keys of Angos's configuration no typed field renders, merged last\ninto the hot file. Checked by Angos only (advisory\n`ExtraConfigUsed`).",
+      "type": "object"
+    },
+    "extraVolumeMounts": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "extraVolumes": {
+      "description": "CA bundles and other files: no `hostPath`; Secrets labelled\n`angos.weebo.io/credential: \"true\"`.",
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "global": {
+      "default": {},
+      "description": "`[global]`: what applies to every repository.",
+      "properties": {
+        "allowMissingManifestReferences": {
+          "description": "`allow_missing_manifest_references`. Angos: true.",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "gcGraceSecs": {
+          "description": "`gc_grace_secs`. Angos: 300.",
+          "format": "uint64",
+          "minimum": 0,
+          "nullable": true,
+          "type": "integer"
+        },
+        "immutableTags": {
+          "description": "`immutable_tags`: a tag can't be moved once pushed.",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "immutableTagsExclusions": {
+          "description": "`immutable_tags_exclusions`: regexes of the tags left mutable.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "jobs": {
+          "description": "`max_concurrent_*_jobs`.",
+          "nullable": true,
+          "properties": {
+            "cache": {
+              "format": "uint64",
+              "minimum": 1,
+              "nullable": true,
+              "type": "integer"
+            },
+            "index": {
+              "format": "uint64",
+              "minimum": 1,
+              "nullable": true,
+              "type": "integer"
+            },
+            "replication": {
+              "format": "uint64",
+              "minimum": 1,
+              "nullable": true,
+              "type": "integer"
+            },
+            "scan": {
+              "format": "uint64",
+              "minimum": 1,
+              "nullable": true,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "limits": {
+          "nullable": true,
+          "properties": {
+            "blobStreamFrameSize": {
+              "description": "`blob_stream_frame_size`. Angos: `128KiB`.",
+              "nullable": true,
+              "pattern": "^[0-9]+(B|KB|KiB|MB|MiB|GB|GiB|TB|TiB)?$",
+              "type": "string"
+            },
+            "maxBlobSize": {
+              "description": "`max_blob_size`. Angos: `100GiB`.",
+              "nullable": true,
+              "pattern": "^[0-9]+(B|KB|KiB|MB|MiB|GB|GiB|TB|TiB)?$",
+              "type": "string"
+            },
+            "maxIndexEntries": {
+              "description": "`max_index_entries`. Angos: 500000.",
+              "format": "uint64",
+              "minimum": 1,
+              "nullable": true,
+              "type": "integer"
+            },
+            "maxIndexSize": {
+              "description": "`max_index_size`. Angos: `50GiB`.",
+              "nullable": true,
+              "pattern": "^[0-9]+(B|KB|KiB|MB|MiB|GB|GiB|TB|TiB)?$",
+              "type": "string"
+            },
+            "maxManifestSize": {
+              "description": "`max_manifest_size`. Angos: `5MiB`.",
+              "nullable": true,
+              "pattern": "^[0-9]+(B|KB|KiB|MB|MiB|GB|GiB|TB|TiB)?$",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "listing": {
+          "nullable": true,
+          "properties": {
+            "listingReadConcurrency": {
+              "format": "uint64",
+              "minimum": 1,
+              "nullable": true,
+              "type": "integer"
+            },
+            "namespaceWalkConcurrency": {
+              "format": "uint64",
+              "minimum": 1,
+              "nullable": true,
+              "type": "integer"
+            },
+            "revisionCacheEntries": {
+              "format": "uint64",
+              "minimum": 1,
+              "nullable": true,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "maxConcurrentRequests": {
+          "description": "`max_concurrent_requests` (Angos's worker threads). Startup only.\nAngos: 64.",
+          "format": "uint64",
+          "minimum": 1,
+          "nullable": true,
+          "type": "integer"
+        },
+        "pullHistory": {
+          "description": "`[global.pull_history]`.",
+          "nullable": true,
+          "properties": {
+            "compactAfterPulls": {
+              "format": "uint64",
+              "minimum": 1,
+              "nullable": true,
+              "type": "integer"
+            },
+            "compactAfterSecs": {
+              "format": "uint64",
+              "minimum": 0,
+              "nullable": true,
+              "type": "integer"
+            },
+            "maxAgeSecs": {
+              "format": "uint64",
+              "minimum": 0,
+              "nullable": true,
+              "type": "integer"
+            },
+            "maxPulls": {
+              "format": "uint64",
+              "minimum": 1,
+              "nullable": true,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "redirects": {
+          "description": "Blob and manifest downloads redirected to presigned S3 URLs.\n**Off by default** (Angos: on): the clients must then reach the\nbucket themselves.",
+          "nullable": true,
+          "properties": {
+            "blob": {
+              "default": false,
+              "description": "`enable_blob_redirect`.",
+              "type": "boolean"
+            },
+            "manifest": {
+              "default": false,
+              "description": "`enable_manifest_redirect`.",
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "shutdownDrainSecs": {
+          "description": "`shutdown_drain_secs`: how long a stopping pod drains. Startup\nonly. Angos: 30; the pods' grace period follows it.",
+          "format": "uint64",
+          "minimum": 0,
+          "nullable": true,
+          "type": "integer"
+        },
+        "updatePullTime": {
+          "description": "`update_pull_time`: record when an image is pulled (needed by any\nrule on `last_pulled_at` or `top_pulled`). Angos: false.",
+          "nullable": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "image": {
+      "description": "The Angos image. Its repository must be one the operator allows\n(`managedInstances.allowedImages`).",
+      "properties": {
+        "pullPolicy": {
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never",
+            null
+          ],
+          "nullable": true,
+          "type": "string"
+        },
+        "repository": {
+          "description": "Default: `ghcr.io/project-angos/angos`.",
+          "nullable": true,
+          "type": "string"
+        },
+        "tag": {
+          "description": "Default: the Angos version the operator targets.",
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "imagePullSecrets": {
+      "items": {
+        "description": "LocalObjectReference contains enough information to let you locate the referenced object inside the same namespace.",
+        "properties": {
+          "name": {
+            "description": "Name of the referent. This field is effectively required, but due to backwards compatibility is allowed to be empty. Instances of this type with an empty value here are almost certainly wrong. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "logLevel": {
+      "default": "info",
+      "description": "`RUST_LOG` of the pods (e.g. `info`, `warn,angos=debug`); the\noperator always adds `angos::configuration::watcher=info`, the\nreload messages it reads.",
+      "type": "string"
+    },
+    "networkPolicy": {
+      "description": "A `NetworkPolicy` around the pods: unset, none.",
+      "nullable": true,
+      "properties": {
+        "egressTo": {
+          "description": "Where the pods may connect besides DNS (the object store, the\nOIDC providers, the upstream registries, the API server).",
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "ingressFrom": {
+          "description": "Who may reach the registry's port; empty: anyone.",
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "nodeSelector": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "podAnnotations": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "podLabels": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "podSecurityContext": {
+      "description": "Unset: non-root 65534 (the image's user), seccomp `RuntimeDefault`.",
+      "type": "object"
+    },
+    "priorityClassName": {
+      "nullable": true,
+      "type": "string"
+    },
+    "reload": {
+      "default": {
+        "mode": "Hot",
+        "onUnconfirmed": "Wait",
+        "timeoutSeconds": 180
+      },
+      "description": "How a new configuration reaches the pods.",
+      "properties": {
+        "mode": {
+          "default": "Hot",
+          "description": "`Hot`: Angos reloads the file in place, the operator reads in each\npod's log that it did. `Rollout`: every change also rolls the pods.",
+          "enum": [
+            "Hot",
+            "Rollout"
+          ],
+          "type": "string"
+        },
+        "onUnconfirmed": {
+          "default": "Wait",
+          "description": "When no answer came in time: `Wait` (keep reading the logs) or\n`Rollout` (roll the pods, which read the file at start).",
+          "enum": [
+            "Wait",
+            "Rollout"
+          ],
+          "type": "string"
+        },
+        "timeoutSeconds": {
+          "default": 180,
+          "description": "How long to wait for every pod's answer (the kubelet takes up to\n90 s to update a mounted Secret).",
+          "format": "uint64",
+          "minimum": 30,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "replicas": {
+      "default": 1,
+      "description": "One replica until the worker and the shared-store checks land.",
+      "format": "int32",
+      "maximum": 1,
+      "minimum": 0,
+      "type": "integer"
+    },
     "repositorySelector": {
-      "description": "Which `AngosRepository`s the instance serves, and from which\nnamespaces.",
+      "description": "Which `AngosRepository`s (and `AngosIdentity`s) the instance\nserves, and from which namespaces.",
       "properties": {
         "namespaces": {
           "description": "The namespaces whose objects may attach to this instance (with an\n`instanceRef` naming it): its own always.",
@@ -117,7 +710,640 @@
         }
       },
       "type": "object"
+    },
+    "resources": {
+      "description": "Unset: requests 100m CPU / 256Mi, limit 1Gi.",
+      "type": "object"
+    },
+    "securityContext": {
+      "description": "Unset: read-only root filesystem, no capability, no escalation.",
+      "type": "object"
+    },
+    "server": {
+      "default": {
+        "port": 8000
+      },
+      "description": "`[server]`: the listener.",
+      "properties": {
+        "handshakeTimeoutSecs": {
+          "description": "`server.handshake_timeout` (seconds, > 0). Angos: 10.",
+          "format": "uint64",
+          "minimum": 1,
+          "nullable": true,
+          "type": "integer"
+        },
+        "port": {
+          "default": 8000,
+          "description": "`server.port`, and the container's port. Read at startup only: a\nchange rolls the pods.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "queryTimeoutGracePeriodSecs": {
+          "description": "`server.query_timeout_grace_period` (seconds, > 0). Angos: 60.",
+          "format": "uint64",
+          "minimum": 1,
+          "nullable": true,
+          "type": "integer"
+        },
+        "queryTimeoutSecs": {
+          "description": "`server.query_timeout` (seconds, > 0). Angos: 3600.",
+          "format": "uint64",
+          "minimum": 1,
+          "nullable": true,
+          "type": "integer"
+        },
+        "tls": {
+          "description": "`[server.tls]`: Angos serves TLS itself, from a `kubernetes.io/tls`\nSecret mounted in the pods. Certificates are reloaded by Angos when\nthe Secret changes; turning TLS on or off rolls the pods.",
+          "nullable": true,
+          "properties": {
+            "clientAuth": {
+              "default": "Optional",
+              "description": "`client_auth`: `Optional` (a certificate is checked when given) or\n`Required`.",
+              "enum": [
+                "Optional",
+                "Required"
+              ],
+              "type": "string"
+            },
+            "clientCA": {
+              "description": "The CA that client certificates must chain to\n(`client_ca_bundle`): a key of a Secret of the namespace, labelled\n`angos.weebo.io/credential: \"true\"`.",
+              "nullable": true,
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "name"
+              ],
+              "type": "object"
+            },
+            "secretName": {
+              "description": "A `kubernetes.io/tls` Secret of the namespace (`tls.crt`,\n`tls.key`), labelled `angos.weebo.io/credential: \"true\"`.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "secretName"
+          ],
+          "type": "object",
+          "x-kubernetes-validations": [
+            {
+              "message": "clientAuth: Required needs clientCA",
+              "rule": "self.clientAuth != 'Required' || has(self.clientCA)"
+            }
+          ]
+        },
+        "trustedProxies": {
+          "description": "`global.trusted_proxies`: the IPs or CIDRs whose forwarded headers\nAngos trusts. Behind an ingress, without it, the client IP Angos\nsees is the ingress controller's.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "service": {
+      "default": {
+        "port": 8000,
+        "type": "ClusterIP"
+      },
+      "properties": {
+        "annotations": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "port": {
+          "default": 8000,
+          "description": "The Service's port (the container's is `server.port`).",
+          "format": "int32",
+          "type": "integer"
+        },
+        "type": {
+          "default": "ClusterIP",
+          "enum": [
+            "ClusterIP",
+            "NodePort",
+            "LoadBalancer"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "serviceAccount": {
+      "default": {
+        "create": true
+      },
+      "properties": {
+        "annotations": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "create": {
+          "default": true,
+          "description": "`false`: use `name`, which must exist.",
+          "type": "boolean"
+        },
+        "name": {
+          "description": "Default: the instance's name.",
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "storage": {
+      "description": "Where Angos keeps blobs and metadata. Read at startup only: a change of\nthe store waits for the annotation `angos.weebo.io/confirm-storage`\n(set to `status.pendingBootHash`), then rolls the pods. Pointing an\ninstance at another, empty store makes it serve an empty registry: no\ndata moves.",
+      "properties": {
+        "fs": {
+          "description": "`[blob_store.fs]`: a directory of the pods, on a volume.",
+          "nullable": true,
+          "properties": {
+            "rootDir": {
+              "default": "/data",
+              "description": "`root_dir`: where the volume is mounted.",
+              "type": "string"
+            },
+            "syncToDisk": {
+              "description": "`sync_to_disk`: fsync every write. Angos: false.",
+              "nullable": true,
+              "type": "boolean"
+            },
+            "volume": {
+              "description": "The volume under `rootDir`: an existing claim, or one the operator\ncreates once (never resized). Unset: an `emptyDir` — the data goes\nwith the pod.",
+              "nullable": true,
+              "properties": {
+                "accessMode": {
+                  "default": "ReadWriteOnce",
+                  "enum": [
+                    "ReadWriteOnce",
+                    "ReadWriteMany",
+                    "ReadWriteOncePod"
+                  ],
+                  "type": "string"
+                },
+                "claimName": {
+                  "description": "An existing `PersistentVolumeClaim` of the namespace.",
+                  "nullable": true,
+                  "type": "string"
+                },
+                "size": {
+                  "description": "The size of the claim the operator creates (`<instance>-data`).",
+                  "nullable": true,
+                  "type": "string"
+                },
+                "storageClass": {
+                  "nullable": true,
+                  "type": "string"
+                }
+              },
+              "type": "object",
+              "x-kubernetes-validations": [
+                {
+                  "message": "volume sets claimName or size, not both",
+                  "rule": "has(self.claimName) != has(self.size)"
+                }
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "metadata": {
+          "description": "`[metadata_store]`: unset, the blob store holds the metadata too.",
+          "nullable": true,
+          "properties": {
+            "fs": {
+              "nullable": true,
+              "properties": {
+                "rootDir": {
+                  "default": "/data",
+                  "description": "`root_dir`: where the volume is mounted.",
+                  "type": "string"
+                },
+                "syncToDisk": {
+                  "description": "`sync_to_disk`: fsync every write. Angos: false.",
+                  "nullable": true,
+                  "type": "boolean"
+                },
+                "volume": {
+                  "description": "The volume under `rootDir`: an existing claim, or one the operator\ncreates once (never resized). Unset: an `emptyDir` — the data goes\nwith the pod.",
+                  "nullable": true,
+                  "properties": {
+                    "accessMode": {
+                      "default": "ReadWriteOnce",
+                      "enum": [
+                        "ReadWriteOnce",
+                        "ReadWriteMany",
+                        "ReadWriteOncePod"
+                      ],
+                      "type": "string"
+                    },
+                    "claimName": {
+                      "description": "An existing `PersistentVolumeClaim` of the namespace.",
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "size": {
+                      "description": "The size of the claim the operator creates (`<instance>-data`).",
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "storageClass": {
+                      "nullable": true,
+                      "type": "string"
+                    }
+                  },
+                  "type": "object",
+                  "x-kubernetes-validations": [
+                    {
+                      "message": "volume sets claimName or size, not both",
+                      "rule": "has(self.claimName) != has(self.size)"
+                    }
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            "s3": {
+              "nullable": true,
+              "properties": {
+                "bucket": {
+                  "type": "string"
+                },
+                "credentialsSecretRef": {
+                  "description": "The access key, in a Secret of the namespace labelled\n`angos.weebo.io/credential: \"true\"`. A change of the Secret's content\nalone rolls the pods without confirmation.",
+                  "properties": {
+                    "accessKeyIdKey": {
+                      "default": "access-key-id",
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "secretKeyKey": {
+                      "default": "secret-key",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "type": "object"
+                },
+                "endpoint": {
+                  "description": "The S3 endpoint URL, e.g. `https://s3.example.com`.",
+                  "type": "string"
+                },
+                "keyPrefix": {
+                  "description": "A prefix of every key Angos writes.",
+                  "nullable": true,
+                  "type": "string"
+                },
+                "region": {
+                  "description": "The bucket's region (`us-east-1` for most S3-compatible stores).",
+                  "type": "string"
+                },
+                "transport": {
+                  "description": "Tuning of the S3 client; Angos's defaults when unset.",
+                  "nullable": true,
+                  "properties": {
+                    "childrenScanConcurrency": {
+                      "format": "uint64",
+                      "minimum": 1,
+                      "nullable": true,
+                      "type": "integer"
+                    },
+                    "circuitBreakerCooldownSecs": {
+                      "format": "uint64",
+                      "minimum": 0,
+                      "nullable": true,
+                      "type": "integer"
+                    },
+                    "circuitBreakerThreshold": {
+                      "format": "uint32",
+                      "minimum": 0,
+                      "nullable": true,
+                      "type": "integer"
+                    },
+                    "maxAttempts": {
+                      "format": "uint32",
+                      "minimum": 0,
+                      "nullable": true,
+                      "type": "integer"
+                    },
+                    "multipartCopyChunkSize": {
+                      "nullable": true,
+                      "pattern": "^[0-9]+(B|KB|KiB|MB|MiB|GB|GiB|TB|TiB)?$",
+                      "type": "string"
+                    },
+                    "multipartCopyJobs": {
+                      "format": "uint64",
+                      "minimum": 1,
+                      "nullable": true,
+                      "type": "integer"
+                    },
+                    "multipartCopyThreshold": {
+                      "nullable": true,
+                      "pattern": "^[0-9]+(B|KB|KiB|MB|MiB|GB|GiB|TB|TiB)?$",
+                      "type": "string"
+                    },
+                    "multipartPartSize": {
+                      "description": "`multipart_part_size`, at least `5MiB` (S3's minimum part).",
+                      "nullable": true,
+                      "pattern": "^[0-9]+(B|KB|KiB|MB|MiB|GB|GiB|TB|TiB)?$",
+                      "type": "string"
+                    },
+                    "multipartUniformParts": {
+                      "nullable": true,
+                      "type": "boolean"
+                    },
+                    "operationAttemptTimeoutSecs": {
+                      "format": "uint64",
+                      "minimum": 0,
+                      "nullable": true,
+                      "type": "integer"
+                    },
+                    "operationTimeoutSecs": {
+                      "format": "uint64",
+                      "minimum": 0,
+                      "nullable": true,
+                      "type": "integer"
+                    },
+                    "presignTtlSecs": {
+                      "description": "How long a presigned URL lives (redirects). Angos: 1800.",
+                      "format": "uint64",
+                      "minimum": 0,
+                      "nullable": true,
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "required": [
+                "bucket",
+                "credentialsSecretRef",
+                "endpoint",
+                "region"
+              ],
+              "type": "object"
+            }
+          },
+          "type": "object",
+          "x-kubernetes-validations": [
+            {
+              "message": "storage.metadata sets exactly one of s3 and fs",
+              "rule": "has(self.s3) != has(self.fs)"
+            }
+          ]
+        },
+        "s3": {
+          "description": "`[blob_store.s3]`: an S3-compatible bucket.",
+          "nullable": true,
+          "properties": {
+            "bucket": {
+              "type": "string"
+            },
+            "credentialsSecretRef": {
+              "description": "The access key, in a Secret of the namespace labelled\n`angos.weebo.io/credential: \"true\"`. A change of the Secret's content\nalone rolls the pods without confirmation.",
+              "properties": {
+                "accessKeyIdKey": {
+                  "default": "access-key-id",
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "secretKeyKey": {
+                  "default": "secret-key",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            },
+            "endpoint": {
+              "description": "The S3 endpoint URL, e.g. `https://s3.example.com`.",
+              "type": "string"
+            },
+            "keyPrefix": {
+              "description": "A prefix of every key Angos writes.",
+              "nullable": true,
+              "type": "string"
+            },
+            "region": {
+              "description": "The bucket's region (`us-east-1` for most S3-compatible stores).",
+              "type": "string"
+            },
+            "transport": {
+              "description": "Tuning of the S3 client; Angos's defaults when unset.",
+              "nullable": true,
+              "properties": {
+                "childrenScanConcurrency": {
+                  "format": "uint64",
+                  "minimum": 1,
+                  "nullable": true,
+                  "type": "integer"
+                },
+                "circuitBreakerCooldownSecs": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "nullable": true,
+                  "type": "integer"
+                },
+                "circuitBreakerThreshold": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "nullable": true,
+                  "type": "integer"
+                },
+                "maxAttempts": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "nullable": true,
+                  "type": "integer"
+                },
+                "multipartCopyChunkSize": {
+                  "nullable": true,
+                  "pattern": "^[0-9]+(B|KB|KiB|MB|MiB|GB|GiB|TB|TiB)?$",
+                  "type": "string"
+                },
+                "multipartCopyJobs": {
+                  "format": "uint64",
+                  "minimum": 1,
+                  "nullable": true,
+                  "type": "integer"
+                },
+                "multipartCopyThreshold": {
+                  "nullable": true,
+                  "pattern": "^[0-9]+(B|KB|KiB|MB|MiB|GB|GiB|TB|TiB)?$",
+                  "type": "string"
+                },
+                "multipartPartSize": {
+                  "description": "`multipart_part_size`, at least `5MiB` (S3's minimum part).",
+                  "nullable": true,
+                  "pattern": "^[0-9]+(B|KB|KiB|MB|MiB|GB|GiB|TB|TiB)?$",
+                  "type": "string"
+                },
+                "multipartUniformParts": {
+                  "nullable": true,
+                  "type": "boolean"
+                },
+                "operationAttemptTimeoutSecs": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "nullable": true,
+                  "type": "integer"
+                },
+                "operationTimeoutSecs": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "nullable": true,
+                  "type": "integer"
+                },
+                "presignTtlSecs": {
+                  "description": "How long a presigned URL lives (redirects). Angos: 1800.",
+                  "format": "uint64",
+                  "minimum": 0,
+                  "nullable": true,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "bucket",
+            "credentialsSecretRef",
+            "endpoint",
+            "region"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "object",
+      "x-kubernetes-validations": [
+        {
+          "message": "storage sets exactly one of s3 and fs",
+          "rule": "has(self.s3) != has(self.fs)"
+        }
+      ]
+    },
+    "terminationGracePeriodSeconds": {
+      "description": "Unset: three times `global.shutdownDrainSecs` (30) plus 10.",
+      "format": "int64",
+      "nullable": true,
+      "type": "integer"
+    },
+    "tolerations": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "tracing": {
+      "description": "`[observability.tracing]`: OTLP traces. Startup only.",
+      "nullable": true,
+      "properties": {
+        "endpoint": {
+          "description": "The OTLP gRPC endpoint.",
+          "type": "string"
+        },
+        "samplingRate": {
+          "description": "The share of traces kept, from 0 to 1.",
+          "format": "double",
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "endpoint",
+        "samplingRate"
+      ],
+      "type": "object"
+    },
+    "ui": {
+      "description": "`[ui]`: Angos's web UI.",
+      "nullable": true,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "name": {
+          "description": "The name the UI shows. Angos: `Angos`.",
+          "nullable": true,
+          "type": "string"
+        },
+        "oidc": {
+          "description": "Sign-in to the UI through an OIDC provider of `auth.oidc` (a public\nPKCE client, no secret).",
+          "nullable": true,
+          "properties": {
+            "clientId": {
+              "nullable": true,
+              "type": "string"
+            },
+            "clientIdFrom": {
+              "description": "The client id from a Secret of the namespace (e.g. the\n`AUTHENTIK_CLIENT_ID` a weebo-authentik application writes),\nlabelled `angos.weebo.io/credential: \"true\"`.",
+              "nullable": true,
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "name"
+              ],
+              "type": "object"
+            },
+            "provider": {
+              "description": "The `name` of an `auth.oidc` provider.",
+              "type": "string"
+            },
+            "scopes": {
+              "description": "The scopes asked. Angos: `openid profile email`.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "provider"
+          ],
+          "type": "object",
+          "x-kubernetes-validations": [
+            {
+              "message": "ui.oidc sets clientId or clientIdFrom",
+              "rule": "has(self.clientId) != has(self.clientIdFrom)"
+            }
+          ]
+        }
+      },
+      "type": "object"
     }
   },
+  "required": [
+    "storage"
+  ],
   "type": "object"
 }

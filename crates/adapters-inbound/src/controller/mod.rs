@@ -8,7 +8,10 @@ use std::time::Instant;
 
 use api::Status;
 use api::status::Condition;
-use application::ports::{BoundInstance, InstanceDirectory};
+use application::ports::{
+    BoundInstance, ClusterIssuer, Credentials, InstanceDirectory, KeyGenerator, OwnedObjects,
+    PodLogs,
+};
 use application::use_cases::Outcome;
 use domain::Failure;
 use domain::error::ReasonCode;
@@ -48,6 +51,16 @@ pub struct Ctx {
     /// Which instance a CR lives on (the kit's `LocalInstances`, on the
     /// watch scope).
     pub instances: Arc<dyn InstanceDirectory>,
+    /// The objects of the instances (the kit's `KubeOwnedObjects`).
+    pub objects: Arc<dyn OwnedObjects>,
+    /// The instances' pods' logs (`pods/log`).
+    pub logs: Arc<dyn PodLogs>,
+    /// The Secrets the specs reference (credential label required).
+    pub credentials: Arc<dyn Credentials>,
+    pub issuer: Arc<dyn ClusterIssuer>,
+    pub keys: Arc<dyn KeyGenerator>,
+    /// The operator's own settings.
+    pub settings: Settings,
     /// One recorder for the whole process: the kit folds repeated Events
     /// into a series only within a recorder.
     pub recorder: Recorder,
@@ -57,6 +70,25 @@ pub struct Ctx {
     /// What the controllers watch (`WEEBO_WATCH_NAMESPACE`,
     /// `WEEBO_WATCH_LABEL_SELECTOR`): every watch goes through it.
     pub scope: WatchScope,
+}
+
+/// What the operator's environment sets (spec 6.11).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Settings {
+    /// `WEEBO_ANGOS_DEFAULT_IMAGE`: the image of an instance without one.
+    pub default_image: String,
+    /// `WEEBO_ANGOS_RELOAD_LOG_BYTES`: at most this many bytes of a pod's
+    /// log are read.
+    pub reload_log_bytes: i64,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            default_image: format!("{}:{}", api::angos::IMAGE_REPOSITORY, api::angos::VERSION),
+            reload_log_bytes: 1 << 20,
+        }
+    }
 }
 
 /// What stopped a reconcile before (or instead of) its status.
@@ -110,7 +142,22 @@ where
 /// Steady-state drift check after a success, a quick retry after a
 /// failure (both jittered — the kit's).
 pub fn requeue_after(outcome: &Outcome) -> Action {
-    weebo_kit_runtime::controller::requeue_after(outcome.ready.is_ok(), None)
+    match &outcome.ready {
+        // A reload being confirmed: its logs are read again soon.
+        Err(f) if f.reason == ReasonCode::ConfigPropagating => {
+            weebo_kit_runtime::controller::requeue_after(false, Some(15))
+        }
+        Err(f) => weebo_kit_runtime::controller::requeue_after(f.reason.needs_a_change(), None),
+        Ok(_)
+            if outcome
+                .advisories
+                .iter()
+                .any(|a| a.reason == ReasonCode::StorageChangePending) =>
+        {
+            weebo_kit_runtime::controller::requeue_after(false, None)
+        }
+        Ok(_) => weebo_kit_runtime::controller::requeue_after(true, None),
+    }
 }
 
 /// `<prefix>_reconcile_total` / `_duration_seconds` (the kit's
@@ -130,12 +177,6 @@ pub trait HasStatus {
     /// The instance recorded at the last resolution.
     fn bound_instance(&self) -> Option<&BoundInstance> {
         self.status()?.instance.as_ref()
-    }
-}
-
-impl HasStatus for api::LocalInstance {
-    fn status(&self) -> Option<&Status> {
-        self.status.as_ref()
     }
 }
 

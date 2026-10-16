@@ -1,8 +1,10 @@
-# The smoke: an instance the operator reconciles on its own (until the
-# workload lands, M1, only its spec is checked).
+# The smoke: an instance on a filesystem store, the operator's first
+# configuration.
 apiVersion: angos.weebo.io/v1alpha1
 kind: AngosLocalInstance
 metadata:
   name: registry
   namespace: team-a
-spec: {}
+spec:
+  storage:
+    fs: {}
