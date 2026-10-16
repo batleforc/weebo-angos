@@ -39,6 +39,7 @@ pub use weebo_kit_runtime::controller::{controller, drive};
 pub mod identity;
 pub mod local_instance;
 pub mod maintenance;
+pub mod metrics;
 pub mod repository;
 
 /// Field manager of the status patches, meter and Event reporter name.

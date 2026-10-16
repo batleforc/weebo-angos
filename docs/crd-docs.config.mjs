@@ -53,5 +53,31 @@ export default defineConfig({
   // metrics & health.
   reference: {
     metricsPrefix: "weebo_angos",
+    extraMetrics: [
+      {
+        name: "weebo_angos_instance_ready",
+        type: "gauge",
+        labels: "`instance_namespace`, `instance_name`",
+        description: "1 when the AngosLocalInstance is `Ready`, 0 otherwise; gone with the instance",
+      },
+      {
+        name: "weebo_angos_config_reloads_total",
+        type: "counter",
+        labels: "`instance_namespace`, `instance_name`, `result` (`applied`, `rejected`, `unconfirmed`: the pods rolled instead)",
+        description: "Hot layers the pods answered",
+      },
+      {
+        name: "weebo_angos_rollouts_total",
+        type: "counter",
+        labels: "`instance_namespace`, `instance_name`, `cause` (`boot`, `image`, `storage`, `fallback`)",
+        description: "Rollouts of an instance's pods: a startup layer, an Angos version, a confirmed storage change, a reload they didn't confirm",
+      },
+      {
+        name: "weebo_angos_maintenance_runs_total",
+        type: "counter",
+        labels: "`task`, `result` (`success`, `failure`, `skipped`)",
+        description: "Maintenance runs ended or skipped",
+      },
+    ],
   },
 });

@@ -1,0 +1,80 @@
+---
+title: Workers, replicas and upgrades
+description: Drain the background jobs apart, run several server pods, move to another Angos version.
+---
+
+## A worker
+
+```yaml
+spec:
+  worker:
+    enabled: true
+    replicas: 1
+    queues: [cache, replication, index]   # empty: Angos's default
+```
+
+`worker` renders `[global.job_queue]` (a startup key) and a
+`<instance>-worker` Deployment running `angos worker`: cache fills,
+replication, scans and index builds leave the server's own loops for a
+durable queue in the store. The worker has no port and no probe: the
+process exiting is its only health signal.
+
+Turning it on rolls the worker **first**: the server hands it the jobs
+only once it runs (`WorkloadNotReady` says so meanwhile). Turning it off
+rolls the server first, then removes the worker. The `scan` queue needs
+`spec.scan`.
+
+Scaling the worker on its queue's depth (`angos_job_queue_pending`, e.g.
+with KEDA) is left to you.
+
+## Several server pods
+
+```yaml
+spec:
+  replicas: 3
+  storage:
+    s3: { … }          # blobs and metadata on S3
+  worker: { enabled: true }
+```
+
+More than one server pod needs an S3 store (blobs and metadata) and the
+worker. They share job claims and immutable tags, which hold only if the
+store's conditional writes (`If-None-Match: *`) are atomic. Angos probes
+that itself when its durable queue starts, and logs a warning when they
+aren't. The operator reads that start of a server's log once per store
+and records it in `status.conditionalWrites`:
+
+- not probed yet: one server pod runs, advisory `ReplicasHeld`;
+- `atomic: true`: `replicas` pods, and a PodDisruptionBudget
+  (`minAvailable: 1`);
+- `atomic: false`: one pod stays, `ReplicasHeld` says why.
+  `angos.weebo.io/allow-advisory-claims: "true"` runs the replicas anyway.
+
+The Service and the budget select the server's pods only.
+
+## Upgrading Angos
+
+The operator targets one Angos version (`image.tag` unset). An instance
+may run another tag of the list it is tested with (the CRD reference of
+`image.tag`), forward, one minor at a time. Anything else (an untested
+tag, an older one, a jump) is refused at admission and by the reconcile
+(`UpgradeNotAllowed`), unless the instance carries
+`angos.weebo.io/approved-upgrade: <that tag>`.
+
+A new tag starts an upgrade, followed in `status.upgrade`:
+
+| Step | Version | What |
+| --- | --- | --- |
+| `ScrubDryRun` | old | `angos scrub -d`: what it would repair |
+| `Scrub` | old | `angos scrub`, once no other maintenance writes |
+| `Rollout` | new | the pods roll |
+| `Verify` | new | `angos scrub -d`: the store reads as the new version expects |
+| `ReconcileIndex` | new | `angos reconcile index` |
+
+Each step is a Job (`<instance>-up-<step>-<hash>`). The instance reports
+`UpgradeInProgress` meanwhile, and the maintenances wait. A failed step
+(`UpgradeFailed`, `status.upgrade.failure`) keeps the pods on the old
+version. To run it again, set `angos.weebo.io/retry-upgrade` to a new
+value. To abandon the upgrade, put the old tag back before the rollout.
+An instance whose store is an `emptyDir` rolls without the Jobs
+(`UpgradeUnchecked`). The `Upgraded` Event closes the upgrade.

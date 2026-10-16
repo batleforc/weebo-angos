@@ -1,0 +1,55 @@
+---
+title: Monitoring
+description: The operator's alerts, and the ones to set on Angos's own metrics.
+---
+
+## The operator
+
+With `metrics.prometheus.enabled` and `prometheusRule.enabled`, the chart
+ships alerts on [the operator's metrics](/docs/reference/metrics):
+
+| Alert | When |
+| --- | --- |
+| `AngosInstanceNotReady` | An instance isn't `Ready` for 15 minutes |
+| `AngosConfigRejected` | Angos refused an instance's configuration (the last accepted one runs) |
+| `AngosPruneSkipped` | Prunes were skipped and none ran for 48 hours (the prune lock holds) |
+| `AngosMaintenanceFailing` | A maintenance run failed in the last hour |
+
+## Angos itself
+
+The operator doesn't scrape Angos: add a ServiceMonitor in your own
+manifests. `/metrics` goes through the access policy, so let the
+scraper in through the instance (`global.access.metrics`, e.g. a
+ServiceAccount with `auth.kubernetes`, or `anonymous` on a network you
+trust):
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: registry
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: angos
+      app.kubernetes.io/instance: registry
+      app.kubernetes.io/component: server
+  endpoints:
+    - port: http
+      path: /metrics
+```
+
+Alerts worth setting on Angos's metrics:
+
+| Alert | Expression (sketch) |
+| --- | --- |
+| Server errors | `sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 0.05` |
+| Authentication failures | `sum(rate(auth_attempts_total{result="failed"}[5m])) > 1` |
+| Failed jobs | `sum by (queue) (angos_job_queue_failed) > 0` (with a worker) |
+| Jobs piling up | `sum by (queue) (angos_job_queue_pending) > 100` for 30 minutes |
+| Upstream down | `sum by (repository) (rate(angos_pull_through_total{outcome="stale"}[15m])) > 0` |
+| Replication stalled | `time() - angos_replication_last_success_timestamp_seconds > 6 * 3600` |
+
+Angos exports neither its version nor its configuration's state, nor the
+outcome of its CLI commands: those come from the operator's status and
+metrics.
