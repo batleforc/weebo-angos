@@ -64,6 +64,15 @@ impl Credentials for KubeCredentials {
             ))
         })
     }
+
+    async fn consents(&self, namespace: &str, name: &str) -> Result<Option<bool>, CredentialError> {
+        let api: Api<Secret> = Api::namespaced(self.client.clone(), namespace);
+        let meta = api
+            .get_metadata_opt(name)
+            .await
+            .map_err(|e| CredentialError::Kubernetes(format!("secret {namespace}/{name}: {e}")))?;
+        Ok(meta.map(|m| m.labels().get(api::CREDENTIAL_LABEL).map(String::as_str) == Some("true")))
+    }
 }
 
 /// The issuer of `/.well-known/openid-configuration`, read once.

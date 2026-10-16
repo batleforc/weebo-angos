@@ -69,6 +69,9 @@ pub trait Credentials: Send + Sync {
     /// The UTF-8 value of `key` of the Secret `name` of `namespace`.
     async fn read(&self, namespace: &str, name: &str, key: &str)
     -> Result<String, CredentialError>;
+    /// Whether the Secret `name` of `namespace` carries the label (`None`:
+    /// it doesn't exist).
+    async fn consents(&self, namespace: &str, name: &str) -> Result<Option<bool>, CredentialError>;
 }
 
 /// The cluster's ServiceAccount token issuer (the API server's OIDC

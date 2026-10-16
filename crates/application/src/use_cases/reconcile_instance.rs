@@ -28,6 +28,7 @@ use api::status::{InstanceStatus, PodReload};
 use domain::error::ReasonCode;
 use domain::{Advisory, Failure};
 use k8s_openapi::jiff::{SignedDuration, Timestamp};
+use weebo_kit_api::annotations as weebo_kit_api_annotations;
 use weebo_kit_application::workload::{LogQuery, Owner};
 
 use super::{Outcome, workload_failure};
@@ -541,8 +542,54 @@ async fn run(
         .map_err(workload_failure)?;
     let writes = current.as_deref() != Some(target.as_str());
 
-    // 5. The objects.
-    let image = workload::image(spec, pass.default_image);
+    // 5. The objects — what rolls the pods held back when they'd be
+    // recreated without consent (spec 6.2).
+    let mut image = workload::image(spec, pass.default_image);
+    let mut boot = boot;
+    let running = ports
+        .objects
+        .rollout(owner, &names.workload())
+        .await
+        .map_err(workload_failure)?;
+    let consent = pass
+        .annotations
+        .get(&api::ANNOTATIONS.key(weebo_kit_api_annotations::ALLOW_DISRUPTIVE_UPDATE))
+        .is_some_and(|v| v == "true");
+    if let Some(running) = running
+        .as_ref()
+        .filter(|_| workload::single_writer(spec) && !consent)
+    {
+        let running_boot = running.annotation(annotations::BOOT_HASH).map(String::from);
+        let running_image = running
+            .annotation(workload::IMAGE_ANNOTATION)
+            .map(String::from);
+        let rolls = running_boot.as_deref() != Some(boot.hash.as_str())
+            || running_image.as_deref() != Some(image.as_str());
+        if rolls
+            && let (Some(running_boot), Some(running_image)) = (running_boot, running_image)
+            && let Some(file) = ports
+                .objects
+                .secret_text(owner, &boot_secret(&owner.name, &running_boot), paths::FILE)
+                .await
+                .map_err(workload_failure)?
+        {
+            advisories.push(advisory(
+                ReasonCode::DisruptiveUpdatePending,
+                format!(
+                    "the pods share a single-writer volume: rolling them recreates them (an \
+                     outage). The change waits for: kubectl annotate angoslocalinstance {} {}=true",
+                    owner.name,
+                    api::ANNOTATIONS.key(weebo_kit_api_annotations::ALLOW_DISRUPTIVE_UPDATE)
+                ),
+            ));
+            boot = Boot {
+                file,
+                hash: running_boot,
+                pending: boot.pending,
+            };
+            image = running_image;
+        }
+    }
     let input = WorkloadInput {
         name: &owner.name,
         namespace: &owner.namespace,

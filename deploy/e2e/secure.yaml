@@ -1,0 +1,114 @@
+# A second instance on what the smoke doesn't touch: an S3 store (RustFS),
+# TLS served by Angos (a cert-manager certificate whose Secret opts in) and
+# the cluster's ServiceAccount tokens as an OIDC provider.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rustfs
+  namespace: team-a
+  labels: { angos.weebo.io/credential: "true" }
+stringData:
+  access-key-id: angos-e2e
+  secret-key: angos-e2e-secret
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rustfs
+  namespace: team-a
+spec:
+  selector: { matchLabels: { app: rustfs } }
+  template:
+    metadata: { labels: { app: rustfs } }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: rustfs
+          image: docker.io/rustfs/rustfs:1.0.1
+          env:
+            - { name: RUSTFS_ADDRESS, value: ":9000" }
+            - { name: RUSTFS_VOLUMES, value: /data }
+            - { name: RUSTFS_ACCESS_KEY, valueFrom: { secretKeyRef: { name: rustfs, key: access-key-id } } }
+            - { name: RUSTFS_SECRET_KEY, valueFrom: { secretKeyRef: { name: rustfs, key: secret-key } } }
+          ports: [{ containerPort: 9000 }]
+          readinessProbe: { tcpSocket: { port: 9000 } }
+          securityContext: { readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: logs, mountPath: /logs }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: data, emptyDir: {} }
+        - { name: logs, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rustfs
+  namespace: team-a
+spec:
+  selector: { app: rustfs }
+  ports: [{ port: 9000 }]
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rustfs-bucket
+  namespace: team-a
+spec:
+  backoffLimit: 20
+  template:
+    spec:
+      restartPolicy: OnFailure
+      securityContext: { runAsNonRoot: true, runAsUser: 65534, runAsGroup: 65534, seccompProfile: { type: RuntimeDefault } }
+      volumes: [{ name: tmp, emptyDir: {} }]
+      containers:
+        - name: aws
+          image: docker.io/amazon/aws-cli:2.38.1
+          env:
+            - { name: AWS_ACCESS_KEY_ID, valueFrom: { secretKeyRef: { name: rustfs, key: access-key-id } } }
+            - { name: AWS_SECRET_ACCESS_KEY, valueFrom: { secretKeyRef: { name: rustfs, key: secret-key } } }
+            - { name: AWS_DEFAULT_REGION, value: us-east-1 }
+            - { name: HOME, value: /tmp }
+          securityContext: { readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+          args: [--endpoint-url, http://rustfs:9000, s3api, create-bucket, --bucket, registry]
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: selfsigned
+  namespace: team-a
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: secure-tls
+  namespace: team-a
+spec:
+  secretName: secure-tls
+  secretTemplate:
+    labels: { angos.weebo.io/credential: "true" }
+  dnsNames: [secure.team-a.svc]
+  issuerRef: { name: selfsigned, kind: Issuer }
+---
+apiVersion: angos.weebo.io/v1alpha1
+kind: AngosLocalInstance
+metadata:
+  name: secure
+  namespace: team-a
+spec:
+  storage:
+    s3:
+      endpoint: http://rustfs.team-a.svc:9000
+      bucket: registry
+      region: us-east-1
+      credentialsSecretRef: { name: rustfs }
+  server:
+    tls: { secretName: secure-tls }
+  auth:
+    kubernetes: { audience: angos }
+    tokenService: { realm: https://secure.team-a.svc/token }

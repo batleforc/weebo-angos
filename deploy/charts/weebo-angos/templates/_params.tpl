@@ -23,8 +23,10 @@ namespacedKinds:
 # The operator reads and writes Secrets in every namespace that has an
 # instance, also limited to one namespace: said explicitly.
 clusterSecrets: true
-# Kinds the admission webhook checks (`/validate`): none yet.
-admitted: []
+# Kinds the admission webhook checks (`/validate`): a configuration Angos
+# would refuse, pods the operator doesn't run, a Secret that doesn't opt in.
+admitted:
+  - angoslocalinstances
 # Cluster-wide only: the namespaced rules below, and the labels of the
 # namespaces repositories come from (repositorySelector.namespaces.from:
 # Selector). Limited to one namespace, none of them: they go to

@@ -27,16 +27,17 @@ kubectl get events -A --field-selector reason=InvalidSpec
 | Code | Severity | Shows as | Meaning |
 | --- | --- | --- | --- |
 | `Reconciled` | advisory | `Ready: True` | `Ready: True` — the one success reason every reconciler uses. |
-| `InvalidSpec` | blocking | `Ready: False`, Event (`Warning`) | The spec breaks a rule Angos would refuse at load (a missing field, a value out of range, a duplicate, a reference to nothing), a CEL rule doesn't compile, `extraConfig` sets a path a typed field renders, or an access subject is too broad for `jobs`/`admin`. Only a change of the spec clears it. |
+| `InvalidSpec` | blocking | `Ready: False`, Event (`Warning`), admission denial | The spec breaks a rule Angos would refuse at load (a missing field, a value out of range, a duplicate, a reference to nothing), a CEL rule doesn't compile, `extraConfig` sets a path a typed field renders, or an access subject is too broad for `jobs`/`admin`. Only a change of the spec clears it. |
 | `InstanceNotFound` | blocking | `Ready: False`, Event (`Warning`) | `spec.instanceRef` names no `AngosLocalInstance` the operator sees (or, unset, there is none in the namespace to default to). |
 | `InstanceAmbiguous` | blocking | `Ready: False`, Event (`Warning`) | `spec.instanceRef` is unset and several instances could serve the object. |
 | `InstanceNotAllowed` | blocking | `Ready: False`, Event (`Warning`) | The instance named is out of reach: one of another namespace that doesn't accept objects of this one, or outside the namespace the operator is limited to. |
 | `InstanceBindingChanged` | blocking | `Ready: False`, Event (`Warning`) | `spec.instanceRef` by name now designates another instance than the one recorded in `status.instance`: not followed until `spec.instanceRef.namespace` says which. |
 | `InstanceInUse` | blocking | `Ready: False`, Event (`Warning`) | The instance is being deleted while repositories, identities or maintenances are still bound to it: it waits for them. |
-| `SecretNotAllowed` | blocking | `Ready: False`, Event (`Warning`) | A `Secret` the operator would read, or the instance's pods would mount, lacks the label `angos.weebo.io/credential: "true"`. |
+| `SecretNotAllowed` | blocking | `Ready: False`, Event (`Warning`), admission denial | A `Secret` the operator would read, or the instance's pods would mount, lacks the label `angos.weebo.io/credential: "true"`. |
 | `SecretMissing` | blocking | `Ready: False`, Event (`Warning`) | A referenced `Secret`, or its key, is missing. |
 | `OwnedObjectConflict` | blocking | `Ready: False`, Event (`Warning`) | An object the operator would create exists and isn't the instance's (no owner reference, no `managed-by` label): never taken over. |
 | `StorageChangePending` | advisory | condition `StorageChangePending: True`, Event (`Normal`) | The storage changed (type, endpoint, bucket, region, prefix): the new startup layer waits for the annotation `angos.weebo.io/confirm-storage` set to `status.pendingBootHash`. |
+| `DisruptiveUpdatePending` | advisory | condition `DisruptiveUpdatePending: True`, Event (`Normal`) | A change that rolls the pods (a startup key, the image) waits: they share a single-writer volume, so they are recreated — an outage. The annotation `angos.weebo.io/allow-disruptive-update: "true"` lets it through. |
 | `WorkloadNotReady` | blocking | `Ready: False`, Event (`Warning`) | The instance's pods aren't ready on the desired startup layer yet (rolling out, or not scheduled). |
 | `BootRejected` | blocking | `Ready: False`, Event (`Warning`) | The new pods don't start (crash loop, `/readyz` never ready): the message quotes the last error they logged. The previous pods keep serving. |
 | `ConfigPropagating` | blocking | `Ready: False`, Event (`Warning`) | The hot layer was written and the pods haven't all confirmed loading it yet. |

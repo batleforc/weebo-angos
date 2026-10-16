@@ -66,6 +66,15 @@ impl Credentials for FakeCredentials {
             CredentialError::Missing(format!("secret {namespace}/{name} has no key {key}"))
         })
     }
+
+    async fn consents(&self, namespace: &str, name: &str) -> Result<Option<bool>, CredentialError> {
+        Ok(self
+            .secrets
+            .lock()
+            .unwrap()
+            .get(&format!("{namespace}/{name}"))
+            .map(|(labelled, _)| *labelled))
+    }
 }
 
 /// A fixed issuer, or none (`Err`).
