@@ -29,7 +29,7 @@ const POLL: Duration = Duration::from_millis(200);
 const GROUP: &str = "angos.weebo.io";
 const OPERATOR_NS: &str = "operator";
 const OPERATOR_SA: &str = "operator";
-const NAMESPACED_KINDS: &[&str] = &["angoslocalinstances"];
+const NAMESPACED_KINDS: &[&str] = &["angoslocalinstances", "angosrepositories"];
 
 fn kind_rules(kinds: &[&str]) -> Vec<PolicyRule> {
     let rule = |suffix: &str, verbs: &[&str]| PolicyRule {

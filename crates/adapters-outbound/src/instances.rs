@@ -77,3 +77,19 @@ impl InstanceDirectory for LocalInstanceDirectory {
             .await
     }
 }
+
+#[async_trait::async_trait]
+impl application::ports::AttachedInstances for LocalInstanceDirectory {
+    async fn resolve_attached(
+        &self,
+        namespace: &str,
+        instance_ref: Option<&InstanceRef>,
+        recorded: Option<&BoundInstance>,
+    ) -> Result<BoundInstance, InstanceError> {
+        LocalInstanceDirectory::resolve_attached(self, namespace, instance_ref, recorded).await
+    }
+
+    async fn instance(&self, bound: &BoundInstance) -> Result<Option<LocalInstance>, String> {
+        self.get(bound).await
+    }
+}

@@ -3,5 +3,10 @@
     "kind": "AngosLocalInstance",
     "singular": "angoslocalinstance",
     "scope": "Namespaced"
+  },
+  {
+    "kind": "AngosRepository",
+    "singular": "angosrepository",
+    "scope": "Namespaced"
   }
 ]

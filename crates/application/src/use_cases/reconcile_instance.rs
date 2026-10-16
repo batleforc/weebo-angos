@@ -75,6 +75,8 @@ pub struct InstancePorts<'a> {
     pub issuer: &'a dyn ClusterIssuer,
     pub keys: &'a dyn KeyGenerator,
     pub ledger: &'a dyn StatusLedger,
+    pub repositories: &'a dyn crate::ports::RepositoryDirectory,
+    pub cel: &'a dyn crate::ports::CelChecker,
 }
 
 /// A pass's result: the `Ready` outcome, the status to publish, the Events
@@ -122,6 +124,7 @@ pub fn status_fields(status: &InstanceStatus) -> serde_json::Map<String, serde_j
         "rejectionMessage",
         "lastRejectionTime",
         "rolledOutFor",
+        "repositories",
     ] {
         map.entry(key).or_insert(serde_json::Value::Null);
     }
@@ -281,6 +284,90 @@ async fn token_key(
         ));
     }
     Ok(key)
+}
+
+/// `global.access`, `global.retention`, `global.index` checked, and the
+/// repositories bound to the instance rendered (or recorded as not).
+async fn policies(
+    pass: &InstancePass<'_>,
+    ports: &InstancePorts<'_>,
+    status: &mut InstanceStatus,
+    resolved: &mut Resolved,
+    advisories: &mut Vec<Advisory>,
+) -> Result<(), Failure> {
+    use crate::rules;
+    let spec = pass.spec;
+    let kube = spec.auth.kubernetes.as_ref().map(|k| k.name.as_str());
+    let invalid =
+        |problems: Vec<String>| Failure::new(ReasonCode::InvalidSpec, problems.join("; "));
+    let mut warnings = Vec::new();
+    let global = rules::global_access(&spec.global.access, kube, ports.cel).map_err(invalid)?;
+    warnings.extend(global.warnings);
+    resolved.global_rules = global.rules;
+    if let Some(retention) = &spec.global.retention {
+        let checked =
+            rules::image_rules("spec.global.retention.rules", &retention.rules, ports.cel)
+                .map_err(invalid)?;
+        warnings.extend(checked.warnings);
+        resolved.retention = Some(domain::config::RetentionPolicy {
+            rules: checked.rules,
+        });
+    }
+    if let Some(index) = &spec.global.index {
+        let (policy, more) =
+            rules::index_policy("spec.global.index", index, ports.cel).map_err(invalid)?;
+        warnings.extend(more);
+        resolved.index = Some(policy);
+    }
+    let views = ports
+        .repositories
+        .bound_to(pass.owner, &spec.repository_selector)
+        .await
+        .map_err(|e| Failure::new(ReasonCode::KubernetesApiError, e))?;
+    let in_service: std::collections::BTreeSet<String> = status
+        .repositories
+        .iter()
+        .filter(|(_, r)| r.state == api::status::RenderState::Rendered)
+        .map(|(key, _)| key.clone())
+        .collect();
+    let lost = crate::repositories::conflicts(&views, &in_service);
+    status.repositories.clear();
+    for view in &views {
+        let key = view.key();
+        let mut render = api::status::RepositoryRender {
+            prefix: view.spec.prefix.clone(),
+            state: api::status::RenderState::Rendered,
+            message: None,
+            conflict_with: None,
+            generation: view.generation,
+        };
+        if let Some(winner) = lost.get(&key) {
+            render.state = api::status::RenderState::Conflict;
+            render.conflict_with = Some(winner.clone());
+            render.message = Some(format!(
+                "its prefix {:?} overlaps the one of the older repository {winner}",
+                view.spec.prefix
+            ));
+        } else {
+            match crate::repositories::render(view, kube, ports.cel, ports.credentials).await {
+                Ok((table, more)) => {
+                    warnings.extend(more.into_iter().map(|w| format!("{key}: {w}")));
+                    resolved
+                        .repositories
+                        .insert(view.spec.prefix.clone(), table);
+                }
+                Err((state, message)) => {
+                    render.state = state;
+                    render.message = Some(message);
+                }
+            }
+        }
+        status.repositories.insert(key, render);
+    }
+    if !warnings.is_empty() {
+        advisories.push(advisory(ReasonCode::RuleMayFail, warnings.join("; ")));
+    }
+    Ok(())
 }
 
 /// The startup layer the pods are to run: the rendered one, unless it
@@ -483,8 +570,9 @@ async fn run(
         spec.service.port
     ));
 
-    // 1–2. The Secrets, then the files.
-    let resolved = resolve(pass, ports, events).await?;
+    // 1–2. The Secrets, the rules and the repositories, then the files.
+    let mut resolved = resolve(pass, ports, events).await?;
+    policies(pass, ports, status, &mut resolved, advisories).await?;
     let rendered = render::render(spec, &resolved).map_err(|e| {
         Failure::new(
             ReasonCode::InvalidSpec,
@@ -798,6 +886,23 @@ async fn run(
                         .map_err(workload_failure)?;
                     status.config_written_time = Some(pass.now.to_string());
                     status.written_config_hash = status.applied_config_hash.clone();
+                }
+                if why == reload::CRASHED {
+                    // Its watcher is dead: restarted, the pods read the
+                    // accepted layer back.
+                    ports
+                        .objects
+                        .annotate_template(
+                            owner,
+                            &names.workload(),
+                            &BTreeMap::from([(
+                                annotations::RESTARTED_AT.to_string(),
+                                format!("crashed-{}", &target_hash[..8]),
+                            )]),
+                            false,
+                        )
+                        .await
+                        .map_err(workload_failure)?;
                 }
                 status.pods.clear();
                 return Err(Failure::new(

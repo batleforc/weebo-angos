@@ -276,9 +276,44 @@ spec:
                   x-kubernetes-preserve-unknown-fields: true
                 type: array
               global:
-                default: {}
+                default:
+                  access: {}
                 description: '`[global]`: what applies to every repository.'
                 properties:
+                  access:
+                    default: {}
+                    description: The global access policy, checked before any repository's.
+                    properties:
+                      admin:
+                        description: |-
+                          Who may do anything: named identities, groups or ServiceAccounts
+                          only.
+                        items:
+                          type: string
+                        type: array
+                      catalog:
+                        description: Who may list the catalog, the repositories and their namespaces.
+                        items:
+                          type: string
+                        type: array
+                      jobs:
+                        description: |-
+                          Who may list, retry and delete background jobs: named identities,
+                          groups or ServiceAccounts only.
+                        items:
+                          type: string
+                        type: array
+                      metrics:
+                        description: Who may scrape `/metrics`.
+                        items:
+                          type: string
+                        type: array
+                      rules:
+                        description: 'More CEL rules (`request`, `identity`): a matching one allows.'
+                        items:
+                          type: string
+                        type: array
+                    type: object
                   allowMissingManifestReferences:
                     description: '`allow_missing_manifest_references`. Angos: true.'
                     nullable: true
@@ -298,6 +333,25 @@ spec:
                     items:
                       type: string
                     type: array
+                  index:
+                    description: '`index` policy of every repository without its own.'
+                    nullable: true
+                    properties:
+                      default:
+                        description: |-
+                          What applies when no rule matches; a matching rule does the
+                          opposite.
+                        enum:
+                        - Index
+                        - Skip
+                        - null
+                        nullable: true
+                        type: string
+                      rules:
+                        items:
+                          type: string
+                        type: array
+                    type: object
                   jobs:
                     description: '`max_concurrent_*_jobs`.'
                     nullable: true
@@ -420,6 +474,18 @@ spec:
                         default: false
                         description: '`enable_manifest_redirect`.'
                         type: boolean
+                    type: object
+                  retention:
+                    description: |-
+                      `retention_policy`: CEL rules on `image` (OR with the
+                      repositories').
+                    nullable: true
+                    properties:
+                      rules:
+                        default: []
+                        items:
+                          type: string
+                        type: array
                     type: object
                   shutdownDrainSecs:
                     description: |-
@@ -1276,6 +1342,41 @@ spec:
               rejectionMessage:
                 nullable: true
                 type: string
+              repositories:
+                additionalProperties:
+                  description: What an instance made of a repository bound to it.
+                  properties:
+                    conflictWith:
+                      description: The repository holding its prefix (`namespace/name`), in conflict.
+                      nullable: true
+                      type: string
+                    generation:
+                      description: The `metadata.generation` rendered.
+                      format: int64
+                      nullable: true
+                      type: integer
+                    message:
+                      description: Why it isn't rendered.
+                      nullable: true
+                      type: string
+                    prefix:
+                      type: string
+                    state:
+                      enum:
+                      - Rendered
+                      - Conflict
+                      - SecretMissing
+                      - SecretNotAllowed
+                      - Invalid
+                      type: string
+                  required:
+                  - prefix
+                  - state
+                  type: object
+                description: |-
+                  The repositories bound to the instance and what became of each
+                  (`namespace/name`): rendered, or why not.
+                type: object
               rolledOutFor:
                 description: When the operator last rolled the pods for an unconfirmed reload.
                 nullable: true

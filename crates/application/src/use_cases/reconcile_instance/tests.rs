@@ -6,7 +6,8 @@ use weebo_kit_application::workload::{OwnedObjects, PodState};
 
 use super::*;
 use crate::test_support::{
-    CountingKeys, FakeCredentials, FakeIssuer, FakeLedger, FakeOwnedObjects, FakePodLogs,
+    CountingKeys, FakeCel, FakeCredentials, FakeIssuer, FakeLedger, FakeOwnedObjects, FakePodLogs,
+    FakeRepositories,
 };
 use api::status::PodReloadState;
 
@@ -26,6 +27,8 @@ struct World {
     issuer: FakeIssuer,
     keys: CountingKeys,
     ledger: FakeLedger,
+    repositories: FakeRepositories,
+    cel: FakeCel,
 }
 
 impl World {
@@ -46,6 +49,8 @@ impl World {
             issuer: FakeIssuer(Some("https://kubernetes.default.svc.cluster.local".into())),
             keys: CountingKeys::default(),
             ledger: FakeLedger::default(),
+            repositories: FakeRepositories::default(),
+            cel: FakeCel::default(),
         }
     }
 
@@ -72,6 +77,8 @@ impl World {
                 issuer: &self.issuer,
                 keys: &self.keys,
                 ledger: &self.ledger,
+                repositories: &self.repositories,
+                cel: &self.cel,
             },
         )
         .await;
@@ -621,4 +628,120 @@ async fn pods_on_a_single_writer_volume_roll_only_with_consent() {
     );
     world.pass().await;
     assert_ne!(world.template_boot_hash().await, first);
+}
+
+#[tokio::test]
+async fn a_reload_that_crashes_angos_is_refused_and_the_pods_restarted() {
+    let mut world = World::fs();
+    running(&mut world).await;
+    world.pod("reg-1", "2026-10-16T09:00:00Z");
+    world.spec.global.gc_grace_secs = Some(600);
+    world.pass().await;
+    let at = world.written();
+    world.logs.push(
+        "team",
+        "reg-1",
+        at + SignedDuration::from_secs(3),
+        "thread 'tokio-rt-worker' (64) panicked at tree.rs:383:9:",
+    );
+    let refused = world.pass().await;
+    assert_eq!(reason(&refused), ReasonCode::ConfigRejected);
+    assert_eq!(
+        refused.status.rejection_message.as_deref(),
+        Some(crate::reload::CRASHED)
+    );
+    let rollout = world
+        .objects
+        .rollout(&world.owner, "reg")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(rollout.annotation(annotations::RESTARTED_AT).is_some());
+}
+
+fn repository(
+    ns: &str,
+    name: &str,
+    created: &str,
+    spec: serde_json::Value,
+) -> crate::repositories::RepositoryView {
+    crate::repositories::RepositoryView {
+        namespace: ns.into(),
+        name: name.into(),
+        created: Some(created.parse().unwrap()),
+        generation: Some(1),
+        annotations: BTreeMap::new(),
+        spec: serde_json::from_value(spec).unwrap(),
+    }
+}
+
+#[tokio::test]
+async fn repositories_are_rendered_or_said_why_not() {
+    use api::status::RenderState;
+    let mut world = World::fs();
+    *world.repositories.0.lock().unwrap() = vec![
+        repository(
+            "team",
+            "team",
+            "2026-01-01T00:00:00Z",
+            json!({
+                "prefix": "team", "access": {"pull": ["anonymous"], "push": ["identity:ci"]},
+                "rules": [],
+            }),
+        ),
+        repository(
+            "team",
+            "app",
+            "2026-01-02T00:00:00Z",
+            json!({"prefix": "team/app"}),
+        ),
+        repository(
+            "other",
+            "hub",
+            "2026-01-03T00:00:00Z",
+            json!({
+                "prefix": "dockerhub",
+                "upstreams": [{"url": "https://registry-1.docker.io", "credentialsSecretRef": {"name": "hub"}}],
+            }),
+        ),
+        repository(
+            "other",
+            "ghcr",
+            "2026-01-04T00:00:00Z",
+            json!({
+                "prefix": "ghcr", "upstreams": [{"url": "https://ghcr.io"}],
+                "access": {"pull": ["authenticated"], "rules": ["flaky"]},
+            }),
+        ),
+    ];
+    world.cel.may_fail("flaky");
+    let report = running(&mut world).await;
+    let repos = &report.status.repositories;
+    assert_eq!(repos["team/team"].state, RenderState::Rendered);
+    assert_eq!(repos["team/app"].state, RenderState::Conflict);
+    assert_eq!(
+        repos["team/app"].conflict_with.as_deref(),
+        Some("team/team")
+    );
+    assert_eq!(repos["other/hub"].state, RenderState::SecretMissing);
+    assert_eq!(repos["other/ghcr"].state, RenderState::Rendered);
+    assert!(advisories(&report).contains(&ReasonCode::RuleMayFail));
+    let hot = world.hot();
+    assert!(hot.contains("[repository.team.access_policy]"), "{hot}");
+    assert!(hot.contains("[[repository.ghcr.upstream]]"), "{hot}");
+    assert!(!hot.contains("dockerhub"));
+    assert!(!hot.contains("team/app"));
+}
+
+#[tokio::test]
+async fn the_global_policy_is_checked_and_rendered_before_the_last_rule() {
+    let mut world = World::new(json!({"storage": {"fs": {}},
+        "global": {"access": {"catalog": ["authenticated"], "admin": ["group:ops"]}}}));
+    running(&mut world).await;
+    let hot = world.hot();
+    let catalog = hot.find("list-catalog").unwrap();
+    let last = hot.find(crate::render::REPOSITORY_RULE).unwrap();
+    assert!(catalog < last);
+    world.spec.global.access.jobs = vec!["anonymous".into()];
+    assert_eq!(reason(&world.pass().await), ReasonCode::InvalidSpec);
 }

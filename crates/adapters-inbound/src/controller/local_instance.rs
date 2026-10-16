@@ -55,7 +55,7 @@ pub async fn run(client: Client, ctx: Arc<Ctx>) {
     // Metadata only: what changed, not the objects.
     let deployments: Api<PartialObjectMeta<Deployment>> = ctx.scope.api(client.clone());
     let pod_api: Api<PartialObjectMeta<Pod>> = ctx.scope.api(client.clone());
-    let results = super::controller(ctx.scope.api::<LocalInstance>(client), &ctx.scope)
+    let results = super::controller(ctx.scope.api::<LocalInstance>(client.clone()), &ctx.scope)
         .watches_stream(
             watcher(deployments, owned)
                 .default_backoff()
@@ -65,6 +65,15 @@ pub async fn run(client: Client, ctx: Arc<Ctx>) {
         .watches_stream(
             watcher(pod_api, pods).default_backoff().touched_objects(),
             |p| instance_of(&p),
+        )
+        // A repository bound to an instance (or no longer) re-renders it.
+        .watches(
+            ctx.scope.api::<api::Repository>(client.clone()),
+            ctx.scope.watcher_config(),
+            |repo| {
+                let bound = repo.status.as_ref()?.common.instance.clone()?;
+                Some(ObjectRef::new(&bound.name).within(bound.namespace.as_deref()?))
+            },
         )
         .graceful_shutdown_on(ctx.shutdown.wait())
         .run(reconcile, error_policy, ctx);
@@ -144,6 +153,8 @@ async fn apply(
             issuer: ctx.issuer.as_ref(),
             keys: ctx.keys.as_ref(),
             ledger: &ledger,
+            repositories: ctx.repositories.as_ref(),
+            cel: ctx.cel.as_ref(),
         },
     )
     .await;

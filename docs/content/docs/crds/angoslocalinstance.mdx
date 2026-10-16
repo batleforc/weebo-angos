@@ -50,7 +50,7 @@ spec:
 | `extraConfig` | `object` | no |  | Keys of Angos's configuration no typed field renders, merged last into the hot file. Checked by Angos only (advisory `ExtraConfigUsed`). |
 | `extraVolumeMounts` | `object[]` | no |  |  |
 | `extraVolumes` | `object[]` | no |  | CA bundles and other files: no `hostPath`; Secrets labelled `angos.weebo.io/credential: "true"`. |
-| `global` | `object` | no | `{}` | `[global]`: what applies to every repository. |
+| `global` | `object` | no | `{"access":{}}` | `[global]`: what applies to every repository. |
 | `image` | `object` | no |  | The Angos image. Its repository must be one the operator allows (`managedInstances.allowedImages`). |
 | `imagePullSecrets` | `object[]` | no |  |  |
 | `logLevel` | `string` | no | `"info"` | `RUST_LOG` of the pods (e.g. `info`, `warn,angos=debug`); the operator always adds `angos::configuration::watcher=info`, the reload messages it reads. |

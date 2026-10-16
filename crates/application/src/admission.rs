@@ -13,7 +13,9 @@ use domain::Failure;
 use domain::error::ReasonCode;
 use weebo_kit_application::pod_safety;
 
+use crate::ports::CelChecker;
 use crate::render::{self, Resolved};
+use crate::rules;
 use crate::workload::{self, sketch};
 
 /// A stand-in for every value the spec takes from a Secret.
@@ -49,6 +51,7 @@ pub fn placeholders(spec: &LocalInstanceSpec) -> Resolved {
             .collect(),
         ui_client_id: Some("placeholder".into()),
         cluster_issuer: Some("https://kubernetes.default.svc".into()),
+        ..Default::default()
     }
 }
 
@@ -110,8 +113,23 @@ pub fn check_instance(
     spec: &LocalInstanceSpec,
     allowed_images: &[String],
     default_image: &str,
+    checker: &dyn CelChecker,
 ) -> Result<(), Failure> {
-    render::render(spec, &placeholders(spec)).map_err(|e| {
+    let invalid =
+        |problems: Vec<String>| Failure::new(ReasonCode::InvalidSpec, problems.join("; "));
+    let kube = spec.auth.kubernetes.as_ref().map(|k| k.name.as_str());
+    let mut resolved = placeholders(spec);
+    resolved.global_rules = rules::global_access(&spec.global.access, kube, checker)
+        .map_err(invalid)?
+        .rules;
+    if let Some(retention) = &spec.global.retention {
+        rules::image_rules("spec.global.retention.rules", &retention.rules, checker)
+            .map_err(invalid)?;
+    }
+    if let Some(index) = &spec.global.index {
+        rules::index_policy("spec.global.index", index, checker).map_err(invalid)?;
+    }
+    render::render(spec, &resolved).map_err(|e| {
         Failure::new(
             ReasonCode::InvalidSpec,
             format!("the configuration Angos would refuse: {e}"),
@@ -146,7 +164,15 @@ mod tests {
 
     fn check(spec: serde_json::Value) -> Result<(), ReasonCode> {
         let spec: LocalInstanceSpec = serde_json::from_value(spec).unwrap();
-        check_instance("reg", "team", &spec, &allowed(), IMAGE).map_err(|f| f.reason)
+        check_instance(
+            "reg",
+            "team",
+            &spec,
+            &allowed(),
+            IMAGE,
+            &crate::test_support::FakeCel::default(),
+        )
+        .map_err(|f| f.reason)
     }
 
     #[test]
@@ -176,6 +202,7 @@ mod tests {
             json!({"storage": {"fs": {}}, "extraVolumes": [{"name": "h", "hostPath": {"path": "/"}}]}),
             json!({"storage": {"fs": {}}, "extraConfig": {"server": {"port": 1}}}),
             json!({"storage": {"fs": {}}, "ui": {"oidc": {"provider": "none", "clientId": "x"}}}),
+            json!({"storage": {"fs": {}}, "global": {"access": {"admin": ["anonymous"]}}}),
         ] {
             assert_eq!(
                 check(refused.clone()),

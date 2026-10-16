@@ -5,11 +5,15 @@
 //! ([`LocalInstanceDirectory`]) and the settings tying the kit's adapters
 //! to `AngosLocalInstance` ([`workload_settings`]).
 
+pub mod cel;
 pub mod cluster;
 pub mod instances;
+pub mod repositories;
 
+pub use cel::CelInterpreterChecker;
 pub use cluster::{KubeClusterIssuer, KubeCredentials, RandomKeys};
 pub use instances::LocalInstanceDirectory;
+pub use repositories::KubeRepositories;
 use weebo_kit_adapters::WorkloadSettings;
 
 /// The field manager of every apply and status patch.

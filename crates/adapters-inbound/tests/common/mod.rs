@@ -7,7 +7,9 @@
 use std::sync::Arc;
 
 use adapters_inbound::controller::{self, Ctx, Settings, Shutdown};
-use adapters_outbound::{KubeCredentials, LocalInstanceDirectory, RandomKeys};
+use adapters_outbound::{
+    CelInterpreterChecker, KubeCredentials, KubeRepositories, LocalInstanceDirectory, RandomKeys,
+};
 use application::test_support::{FakeIssuer, FakePodLogs};
 use kube::Client;
 use kube::runtime::events::{Recorder, Reporter};
@@ -22,13 +24,19 @@ pub fn ctx(client: &Client, scope: WatchScope, logs: Arc<FakePodLogs>) -> (Arc<C
     ));
     let ctx = Arc::new(Ctx {
         client: client.clone(),
-        instances,
+        instances: instances.clone(),
         objects: Arc::new(KubeOwnedObjects::new(
             client.clone(),
             adapters_outbound::workload_settings(vec![api::angos::IMAGE_REPOSITORY.into()]),
         )),
         logs,
         credentials: Arc::new(KubeCredentials::new(client.clone())),
+        repositories: Arc::new(KubeRepositories::new(client.clone()).with_scope(
+            scope.watched_namespace().map(String::from),
+            scope.selector().cloned(),
+        )),
+        attached: instances.clone(),
+        cel: Arc::new(CelInterpreterChecker),
         issuer: Arc::new(FakeIssuer(Some("https://kubernetes.default.svc".into()))),
         keys: Arc::new(RandomKeys),
         settings: Settings::default(),

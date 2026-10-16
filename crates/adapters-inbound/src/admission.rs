@@ -1,21 +1,29 @@
-//! The validating webhook (`POST /validate`, the kit's router): an
-//! `AngosLocalInstance` is refused when Angos would refuse its
-//! configuration, when its pods break the operator's rules, or when a
-//! Secret it names exists without `angos.weebo.io/credential: "true"`
-//! (spec 2.2, 2.8). A Secret that doesn't exist yet is let through: the
-//! reconcile waits for it (`SecretMissing`).
+//! The validating webhook (`POST /validate`, the kit's router):
+//!
+//! - an `AngosLocalInstance` is refused when Angos would refuse its
+//!   configuration (its rules checked on Angos's CEL engine), when its pods
+//!   break the operator's rules, or when a Secret it names exists without
+//!   `angos.weebo.io/credential: "true"` (spec 2.2, 2.6, 2.8) — a Secret
+//!   that doesn't exist yet is let through, the reconcile waits for it;
+//! - an `AngosRepository` is refused when its vocabulary or its rules
+//!   don't hold, or when its prefix overlaps a repository already bound to
+//!   its instance (spec 4.2).
 
 use std::sync::Arc;
 
-use api::LocalInstance;
+use api::{LocalInstance, Repository};
 use application::admission::{check_instance, referenced_secrets};
-use application::ports::Credentials;
+use application::ports::{AttachedInstances, CelChecker, Credentials, Owner, RepositoryDirectory};
 use domain::error::ReasonCode;
+use domain::validation::belongs_to;
 use kube::core::DynamicObject;
 use weebo_kit_runtime::admission::{Admission, Denial, typed};
 
 pub struct AngosAdmission {
     pub credentials: Arc<dyn Credentials>,
+    pub cel: Arc<dyn CelChecker>,
+    pub attached: Arc<dyn AttachedInstances>,
+    pub repositories: Arc<dyn RepositoryDirectory>,
     pub allowed_images: Vec<String>,
     pub default_image: String,
 }
@@ -30,11 +38,15 @@ impl Admission for AngosAdmission {
         namespace: &str,
         object: &DynamicObject,
     ) -> Result<(), Denial<ReasonCode>> {
-        if kind != "AngosLocalInstance" {
-            return Err(Denial::new(
-                ReasonCode::InvalidSpec,
-                format!("kind {kind} is not one the operator admits"),
-            ));
+        match kind {
+            "AngosLocalInstance" => {}
+            "AngosRepository" => return self.admit_repository(namespace, object).await,
+            _ => {
+                return Err(Denial::new(
+                    ReasonCode::InvalidSpec,
+                    format!("kind {kind} is not one the operator admits"),
+                ));
+            }
         }
         let instance: LocalInstance =
             typed(object).map_err(|e| Denial::new(ReasonCode::InvalidSpec, e))?;
@@ -45,6 +57,7 @@ impl Admission for AngosAdmission {
             &instance.spec,
             &self.allowed_images,
             &self.default_image,
+            self.cel.as_ref(),
         )
         .map_err(|f| Denial::new(f.reason, f.message))?;
         let image = application::workload::image(&instance.spec, &self.default_image);
@@ -72,6 +85,82 @@ impl Admission for AngosAdmission {
     }
 }
 
+impl AngosAdmission {
+    async fn admit_repository(
+        &self,
+        namespace: &str,
+        object: &DynamicObject,
+    ) -> Result<(), Denial<ReasonCode>> {
+        let repo: Repository =
+            typed(object).map_err(|e| Denial::new(ReasonCode::InvalidSpec, e))?;
+        let name = object.metadata.name.clone().unwrap_or_default();
+        let recorded = repo.status.as_ref().and_then(|s| s.common.instance.clone());
+        // Not resolvable yet (no instance): the spec alone is checked, the
+        // reconcile says why it waits.
+        let bound = self
+            .attached
+            .resolve_attached(
+                namespace,
+                repo.spec.instance_ref.as_ref(),
+                recorded.as_ref(),
+            )
+            .await
+            .ok();
+        let instance = match &bound {
+            Some(bound) => self
+                .attached
+                .instance(bound)
+                .await
+                .map_err(|e| Denial::new(ReasonCode::KubernetesApiError, e))?,
+            None => None,
+        };
+        let kube = instance
+            .as_ref()
+            .and_then(|i| i.spec.auth.kubernetes.as_ref())
+            .map(|k| k.name.as_str())
+            // Unknown yet: the kubernetes subjects are checked later.
+            .or(if instance.is_none() {
+                Some("kube")
+            } else {
+                None
+            });
+        let annotations = object.metadata.annotations.clone().unwrap_or_default();
+        application::repositories::validate(&repo.spec, &annotations, kube, self.cel.as_ref())
+            .map_err(|problems| Denial::new(ReasonCode::InvalidSpec, problems.join("; ")))?;
+        let Some(instance) = instance else {
+            return Ok(());
+        };
+        let owner = Owner {
+            namespace: instance.metadata.namespace.clone().unwrap_or_default(),
+            name: instance.metadata.name.clone().unwrap_or_default(),
+            uid: instance.metadata.uid.clone().unwrap_or_default(),
+        };
+        let bound_repos = self
+            .repositories
+            .bound_to(&owner, &instance.spec.repository_selector)
+            .await
+            .map_err(|e| Denial::new(ReasonCode::KubernetesApiError, e))?;
+        let key = format!("{namespace}/{name}");
+        let prefix = &repo.spec.prefix;
+        if let Some(other) = bound_repos.iter().find(|r| {
+            r.key() != key
+                && (belongs_to(prefix, &r.spec.prefix) || belongs_to(&r.spec.prefix, prefix))
+        }) {
+            return Err(Denial::new(
+                ReasonCode::PrefixConflict,
+                format!(
+                    "prefix {prefix:?} overlaps {:?} of {} on {}/{}",
+                    other.spec.prefix,
+                    other.key(),
+                    owner.namespace,
+                    owner.name
+                ),
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use application::test_support::FakeCredentials;
@@ -79,9 +168,33 @@ mod tests {
 
     use super::*;
 
+    struct NoInstance;
+
+    #[async_trait::async_trait]
+    impl AttachedInstances for NoInstance {
+        async fn resolve_attached(
+            &self,
+            _: &str,
+            _: Option<&weebo_kit_api::InstanceRef>,
+            _: Option<&application::ports::BoundInstance>,
+        ) -> Result<application::ports::BoundInstance, application::ports::InstanceError> {
+            Err(application::ports::InstanceError::Kubernetes("none".into()))
+        }
+
+        async fn instance(
+            &self,
+            _: &application::ports::BoundInstance,
+        ) -> Result<Option<LocalInstance>, String> {
+            Ok(None)
+        }
+    }
+
     fn admission(credentials: FakeCredentials) -> AngosAdmission {
         AngosAdmission {
             credentials: Arc::new(credentials),
+            cel: Arc::new(application::test_support::FakeCel::default()),
+            attached: Arc::new(NoInstance),
+            repositories: Arc::new(application::test_support::FakeRepositories::default()),
             allowed_images: vec![api::angos::IMAGE_REPOSITORY.into()],
             default_image: format!("{}:{}", api::angos::IMAGE_REPOSITORY, api::angos::VERSION),
         }
@@ -138,5 +251,36 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn a_repository_s_spec_is_checked_without_its_instance() {
+        let admission = admission(FakeCredentials::default());
+        let repo = |spec: serde_json::Value| -> DynamicObject {
+            serde_json::from_value(json!({
+                "apiVersion": "angos.weebo.io/v1alpha1", "kind": "AngosRepository",
+                "metadata": {"name": "app", "namespace": "team"}, "spec": spec,
+            }))
+            .unwrap()
+        };
+        assert!(
+            admission
+                .admit(
+                    "AngosRepository",
+                    "team",
+                    &repo(json!({"prefix": "team", "access": {"pull": ["anonymous"]}}))
+                )
+                .await
+                .is_ok()
+        );
+        let denied = admission
+            .admit(
+                "AngosRepository",
+                "team",
+                &repo(json!({"prefix": "team", "access": {"admin": [], "pull": ["nobody"]}})),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(denied.reason, ReasonCode::InvalidSpec);
     }
 }

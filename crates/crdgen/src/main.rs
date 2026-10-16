@@ -15,14 +15,10 @@ struct Args {
     out: PathBuf,
 }
 
-#[expect(
-    clippy::single_element_loop,
-    reason = "the repository, identity and maintenance kinds come next"
-)]
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     fs::create_dir_all(&args.out)?;
-    for crd in [api::LocalInstance::crd()] {
+    for crd in [api::LocalInstance::crd(), api::Repository::crd()] {
         write_crd(&args.out, &crd)?;
     }
     println!("wrote CRDs to {}", args.out.display());

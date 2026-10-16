@@ -8,6 +8,7 @@
 
 pub mod config;
 pub mod local_instance;
+pub mod repository;
 pub mod status;
 
 /// API group shared by every CRD of this operator.
@@ -64,4 +65,5 @@ pub mod angos {
 }
 
 pub use local_instance::LocalInstance;
+pub use repository::Repository;
 pub use status::{InstanceStatus, Status};

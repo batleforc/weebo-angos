@@ -99,3 +99,55 @@ pub trait StatusLedger: Send + Sync {
         fields: serde_json::Map<String, serde_json::Value>,
     ) -> Result<(), String>;
 }
+
+/// What a CEL rule is evaluated against (spec 2.6): an access policy
+/// (`request`, `identity`, `has_repository_policy()`) or an image policy
+/// — retention, scan, index (`image`, `now()`, `days()`, `top_pushed()`…).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuleContext {
+    Access,
+    Image,
+}
+
+/// What Angos would make of a rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuleVerdict {
+    Ok,
+    /// It fails to evaluate on a plausible request (an access rule then
+    /// denies, an image rule applies its policy): advisory.
+    MayFail(String),
+    /// It doesn't compile, names what doesn't exist, or isn't a boolean.
+    Refused(String),
+}
+
+/// Angos's CEL engine, at Angos's version (spec 2.6).
+pub trait CelChecker: Send + Sync {
+    fn check(&self, context: RuleContext, rule: &str) -> RuleVerdict;
+}
+
+/// The `AngosRepository`s bound to an instance (their `status.instance`),
+/// in scope of the operator, from namespaces the instance accepts.
+#[async_trait::async_trait]
+pub trait RepositoryDirectory: Send + Sync {
+    /// Those recording `instance` in `status.instance`, matching its
+    /// `selector`, from its own namespace or one it accepts.
+    async fn bound_to(
+        &self,
+        instance: &Owner,
+        selector: &api::local_instance::RepositorySelector,
+    ) -> Result<Vec<crate::repositories::RepositoryView>, String>;
+}
+
+/// The instances a repository may bind to: resolution through the
+/// instance's consent (`repositorySelector.namespaces`), and the instance
+/// itself.
+#[async_trait::async_trait]
+pub trait AttachedInstances: Send + Sync {
+    async fn resolve_attached(
+        &self,
+        namespace: &str,
+        instance_ref: Option<&weebo_kit_api::InstanceRef>,
+        recorded: Option<&BoundInstance>,
+    ) -> Result<BoundInstance, InstanceError>;
+    async fn instance(&self, bound: &BoundInstance) -> Result<Option<api::LocalInstance>, String>;
+}

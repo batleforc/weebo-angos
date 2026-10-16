@@ -9,10 +9,10 @@ runs its workload, and reads what the pods did with it in their logs.
 | Kind                 | Short | What it does                                                              |
 | -------------------- | ----- | ------------------------------------------------------------------------- |
 | `AngosLocalInstance` | `ali` | An Angos registry in a namespace: its workload and configuration          |
+| `AngosRepository`    | `arepo` | A repository of an instance: its prefix, access, upstreams, downstreams |
 
-Coming next (milestones M1–M5): the workload and both configuration
-layers of an instance, `AngosRepository` (`arepo`), `AngosIdentity`
-(`aid`), `AngosMaintenance` (`amaint`).
+Coming next (milestones M3–M5): `AngosIdentity` (`aid`),
+`AngosMaintenance` (`amaint`), the worker and replicas.
 
 Targets Angos **1.12.3** (`api::angos`): the configuration model
 (`domain::config`), the rules Angos checks it with

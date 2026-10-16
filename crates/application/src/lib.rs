@@ -6,6 +6,8 @@ pub mod admission;
 pub mod ports;
 pub mod reload;
 pub mod render;
+pub mod repositories;
+pub mod rules;
 pub mod use_cases;
 pub mod workload;
 
