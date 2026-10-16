@@ -2356,13 +2356,17 @@ dependencies = [
  "adapters-outbound",
  "anyhow",
  "api",
+ "k8s-openapi",
  "kube",
  "rustls",
+ "serde_json",
+ "testkit",
  "tokio",
  "tracing",
  "uuid",
  "weebo-kit-adapters",
  "weebo-kit-application",
+ "weebo-kit-perf",
  "weebo-kit-runtime",
 ]
 
@@ -4236,6 +4240,21 @@ dependencies = [
 name = "weebo-kit-domain"
 version = "0.17.0"
 source = "git+https://github.com/batleforc/weebo-operator-kit?tag=v0.17.0#1ab818d6e2805aabd721f02e1acfb87a2aeb90eb"
+
+[[package]]
+name = "weebo-kit-perf"
+version = "0.17.0"
+source = "git+https://github.com/batleforc/weebo-operator-kit?tag=v0.17.0#1ab818d6e2805aabd721f02e1acfb87a2aeb90eb"
+dependencies = [
+ "http",
+ "k8s-openapi",
+ "kube",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "weebo-kit-testkit",
+]
 
 [[package]]
 name = "weebo-kit-runtime"

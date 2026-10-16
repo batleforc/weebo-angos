@@ -53,6 +53,9 @@ export default defineConfig({
   // metrics & health.
   reference: {
     metricsPrefix: "weebo_angos",
+    // `task perf`'s report (crates/operator/tests/perf.rs): the "Resource
+    // budget" page, refreshed weekly by .github/workflows/perf.yml.
+    perfReport: "perf/weebo-angos.json",
     extraMetrics: [
       {
         name: "weebo_angos_instance_ready",

@@ -1,0 +1,703 @@
+{
+  "label": "weebo-angos",
+  "startup_secs": 0.101677823,
+  "shutdown_secs": 0.011681306,
+  "background_api_requests_per_min": 20.0,
+  "phases": [
+    {
+      "name": "startup",
+      "kind": "idle",
+      "wall_secs": 30.030515056,
+      "usage": {
+        "samples": 120,
+        "rss_peak_mib": 25.3984375,
+        "rss_median_mib": 25.3984375,
+        "cpu_seconds": 0.009999999999999998,
+        "cpu_mean_millicores": 0.33613788516743437,
+        "cpu_peak_millicores": 39.946998960930614,
+        "rss_slope_mib_per_min": 0.0,
+        "fds_max": 23,
+        "threads_max": 17
+      },
+      "reconciles": 0.0,
+      "reconcile_errors": 0.0,
+      "reconcile_p95_secs": null,
+      "api_requests": 15.989828314666667,
+      "api_requests_per_min": 31.947160982452647,
+      "api_top": [
+        [
+          "PUT leases",
+          7.0
+        ],
+        [
+          "GET leases",
+          6.0
+        ],
+        [
+          "GET ",
+          2.0
+        ],
+        [
+          "GET endpoints",
+          1.0
+        ],
+        [
+          "GET endpointslices",
+          1.0
+        ]
+      ],
+      "objects": null,
+      "convergence_secs": null
+    },
+    {
+      "name": "warm-up burst",
+      "kind": "load",
+      "wall_secs": 17.091835888,
+      "usage": {
+        "samples": 68,
+        "rss_peak_mib": 45.16015625,
+        "rss_median_mib": 43.7890625,
+        "cpu_seconds": 2.74,
+        "cpu_mean_millicores": 163.58479681714547,
+        "cpu_peak_millicores": 2565.503744396809,
+        "rss_slope_mib_per_min": 5.342024640212225,
+        "fds_max": 27,
+        "threads_max": 17
+      },
+      "reconciles": 828.0,
+      "reconcile_errors": 619.0,
+      "reconcile_p95_secs": 0.0047846715328467146,
+      "api_requests": 1981.3027213706666,
+      "api_requests_per_min": 6955.260047032346,
+      "api_top": [
+        [
+          "PATCH angosrepositories",
+          1022.0
+        ],
+        [
+          "PATCH events",
+          421.0
+        ],
+        [
+          "POST events",
+          402.0
+        ],
+        [
+          "POST angosrepositories",
+          200.0
+        ],
+        [
+          "LIST angosrepositories",
+          40.0
+        ],
+        [
+          "GET secrets",
+          26.0
+        ],
+        [
+          "GET deployments",
+          24.0
+        ],
+        [
+          "PATCH angoslocalinstances",
+          10.0
+        ]
+      ],
+      "objects": 200,
+      "convergence_secs": 17.062079222
+    },
+    {
+      "name": "warm-up churn",
+      "kind": "load",
+      "wall_secs": 16.726249757,
+      "usage": {
+        "samples": 67,
+        "rss_peak_mib": 47.3984375,
+        "rss_median_mib": 46.36328125,
+        "cpu_seconds": 2.9799999999999995,
+        "cpu_mean_millicores": 180.59939097204318,
+        "cpu_peak_millicores": 2673.600821987798,
+        "rss_slope_mib_per_min": 0.18379761645601733,
+        "fds_max": 27,
+        "threads_max": 17
+      },
+      "reconciles": 803.0,
+      "reconcile_errors": 602.0,
+      "reconcile_p95_secs": 0.004773779724655819,
+      "api_requests": 1675.4245834143333,
+      "api_requests_per_min": 6010.04268531801,
+      "api_top": [
+        [
+          "PATCH angosrepositories",
+          1000.0
+        ],
+        [
+          "PATCH events",
+          804.0
+        ],
+        [
+          "LIST angosrepositories",
+          36.0
+        ],
+        [
+          "GET secrets",
+          13.0
+        ],
+        [
+          "GET deployments",
+          12.0
+        ],
+        [
+          "PATCH angoslocalinstances",
+          5.0
+        ],
+        [
+          "APPLY secrets",
+          4.0
+        ],
+        [
+          "PUT leases",
+          3.0
+        ]
+      ],
+      "objects": 200,
+      "convergence_secs": 16.694341045
+    },
+    {
+      "name": "warm-up delete",
+      "kind": "load",
+      "wall_secs": 16.304092526,
+      "usage": {
+        "samples": 65,
+        "rss_peak_mib": 50.296875,
+        "rss_median_mib": 50.296875,
+        "cpu_seconds": 1.38,
+        "cpu_mean_millicores": 86.25117532320334,
+        "cpu_peak_millicores": 2483.4878600203665,
+        "rss_slope_mib_per_min": 1.3589401752847712,
+        "fds_max": 27,
+        "threads_max": 17
+      },
+      "reconciles": 204.0,
+      "reconcile_errors": 2.0,
+      "reconcile_p95_secs": 0.0048449999999999995,
+      "api_requests": 1096.5653024913333,
+      "api_requests_per_min": 4035.4235014649835,
+      "api_top": [
+        [
+          "PATCH angosrepositories",
+          800.0
+        ],
+        [
+          "POST events",
+          400.0
+        ],
+        [
+          "DELETE angosrepositories",
+          200.0
+        ],
+        [
+          "LIST angoslocalinstances",
+          31.0
+        ],
+        [
+          "GET secrets",
+          17.0
+        ],
+        [
+          "GET deployments",
+          16.0
+        ],
+        [
+          "LIST angosrepositories",
+          6.0
+        ],
+        [
+          "PATCH angoslocalinstances",
+          6.0
+        ]
+      ],
+      "objects": 200,
+      "convergence_secs": 16.272113091
+    },
+    {
+      "name": "warm-up 2 burst",
+      "kind": "load",
+      "wall_secs": 17.101718575,
+      "usage": {
+        "samples": 68,
+        "rss_peak_mib": 53.54296875,
+        "rss_median_mib": 52.63671875,
+        "cpu_seconds": 3.170000000000001,
+        "cpu_mean_millicores": 189.2529706254325,
+        "cpu_peak_millicores": 2594.543260396462,
+        "rss_slope_mib_per_min": 1.6429881720523507,
+        "fds_max": 27,
+        "threads_max": 17
+      },
+      "reconciles": 921.0,
+      "reconcile_errors": 720.0,
+      "reconcile_p95_secs": 0.0048021405049396265,
+      "api_requests": 2172.2994271416665,
+      "api_requests_per_min": 7621.337297587941,
+      "api_top": [
+        [
+          "PATCH angosrepositories",
+          1115.0
+        ],
+        [
+          "PATCH events",
+          522.0
+        ],
+        [
+          "POST events",
+          400.0
+        ],
+        [
+          "POST angosrepositories",
+          200.0
+        ],
+        [
+          "LIST angosrepositories",
+          40.0
+        ],
+        [
+          "GET secrets",
+          25.0
+        ],
+        [
+          "GET deployments",
+          24.0
+        ],
+        [
+          "PATCH angoslocalinstances",
+          11.0
+        ]
+      ],
+      "objects": 200,
+      "convergence_secs": 17.066026424
+    },
+    {
+      "name": "warm-up 2 churn",
+      "kind": "load",
+      "wall_secs": 16.727934535,
+      "usage": {
+        "samples": 67,
+        "rss_peak_mib": 54.30859375,
+        "rss_median_mib": 53.7890625,
+        "cpu_seconds": 3.0599999999999987,
+        "cpu_mean_millicores": 185.44989478704147,
+        "cpu_peak_millicores": 2717.885832711536,
+        "rss_slope_mib_per_min": 0.4365446962620575,
+        "fds_max": 27,
+        "threads_max": 17
+      },
+      "reconciles": 803.0,
+      "reconcile_errors": 602.0,
+      "reconcile_p95_secs": 0.004779761904761905,
+      "api_requests": 1675.4240218216667,
+      "api_requests_per_min": 6009.435360891075,
+      "api_top": [
+        [
+          "PATCH angosrepositories",
+          1000.0
+        ],
+        [
+          "PATCH events",
+          804.0
+        ],
+        [
+          "LIST angosrepositories",
+          36.0
+        ],
+        [
+          "GET secrets",
+          13.0
+        ],
+        [
+          "GET deployments",
+          12.0
+        ],
+        [
+          "PATCH angoslocalinstances",
+          5.0
+        ],
+        [
+          "APPLY secrets",
+          4.0
+        ],
+        [
+          "PUT leases",
+          3.0
+        ]
+      ],
+      "objects": 200,
+      "convergence_secs": 16.695798125
+    },
+    {
+      "name": "warm-up 2 delete",
+      "kind": "load",
+      "wall_secs": 16.316807818,
+      "usage": {
+        "samples": 66,
+        "rss_peak_mib": 55.05859375,
+        "rss_median_mib": 55.05859375,
+        "cpu_seconds": 1.4499999999999993,
+        "cpu_mean_millicores": 89.225842783721,
+        "cpu_peak_millicores": 2437.6517125991827,
+        "rss_slope_mib_per_min": 0.2026964725386407,
+        "fds_max": 27,
+        "threads_max": 17
+      },
+      "reconciles": 204.0,
+      "reconcile_errors": 2.0,
+      "reconcile_p95_secs": 0.0048693467336683414,
+      "api_requests": 1094.5610640606667,
+      "api_requests_per_min": 4024.908828747228,
+      "api_top": [
+        [
+          "PATCH angosrepositories",
+          800.0
+        ],
+        [
+          "POST events",
+          400.0
+        ],
+        [
+          "DELETE angosrepositories",
+          200.0
+        ],
+        [
+          "LIST angoslocalinstances",
+          31.0
+        ],
+        [
+          "GET secrets",
+          17.0
+        ],
+        [
+          "GET deployments",
+          16.0
+        ],
+        [
+          "LIST angosrepositories",
+          6.0
+        ],
+        [
+          "PATCH angoslocalinstances",
+          6.0
+        ]
+      ],
+      "objects": 200,
+      "convergence_secs": 16.284840765
+    },
+    {
+      "name": "baseline",
+      "kind": "idle",
+      "wall_secs": 30.03541642,
+      "usage": {
+        "samples": 120,
+        "rss_peak_mib": 55.05859375,
+        "rss_median_mib": 55.05859375,
+        "cpu_seconds": 0.0,
+        "cpu_mean_millicores": 0.0,
+        "cpu_peak_millicores": 0.0,
+        "rss_slope_mib_per_min": 0.0,
+        "fds_max": 27,
+        "threads_max": 17
+      },
+      "reconciles": 0.0,
+      "reconcile_errors": 0.0,
+      "reconcile_p95_secs": null,
+      "api_requests": 15.988194526666668,
+      "api_requests_per_min": 31.93868392519527,
+      "api_top": [
+        [
+          "PUT leases",
+          7.0
+        ],
+        [
+          "GET leases",
+          6.0
+        ],
+        [
+          "GET ",
+          2.0
+        ],
+        [
+          "GET endpoints",
+          1.0
+        ],
+        [
+          "GET endpointslices",
+          1.0
+        ]
+      ],
+      "objects": null,
+      "convergence_secs": null
+    },
+    {
+      "name": "cycle burst",
+      "kind": "load",
+      "wall_secs": 17.104402928,
+      "usage": {
+        "samples": 68,
+        "rss_peak_mib": 57.74609375,
+        "rss_median_mib": 57.3046875,
+        "cpu_seconds": 3.460000000000001,
+        "cpu_mean_millicores": 206.55768088783663,
+        "cpu_peak_millicores": 2555.7220484233494,
+        "rss_slope_mib_per_min": 1.7104326079519556,
+        "fds_max": 27,
+        "threads_max": 17
+      },
+      "reconciles": 916.0,
+      "reconcile_errors": 715.0,
+      "reconcile_p95_secs": 0.004807734806629833,
+      "api_requests": 2164.2985323573334,
+      "api_requests_per_min": 7592.075121713948,
+      "api_top": [
+        [
+          "PATCH angosrepositories",
+          1110.0
+        ],
+        [
+          "PATCH events",
+          517.0
+        ],
+        [
+          "POST events",
+          400.0
+        ],
+        [
+          "POST angosrepositories",
+          200.0
+        ],
+        [
+          "LIST angosrepositories",
+          40.0
+        ],
+        [
+          "GET secrets",
+          25.0
+        ],
+        [
+          "GET deployments",
+          24.0
+        ],
+        [
+          "PATCH angoslocalinstances",
+          11.0
+        ]
+      ],
+      "objects": 200,
+      "convergence_secs": 17.071323798
+    },
+    {
+      "name": "cycle loaded",
+      "kind": "idle",
+      "wall_secs": 30.033421874,
+      "usage": {
+        "samples": 120,
+        "rss_peak_mib": 57.74609375,
+        "rss_median_mib": 57.74609375,
+        "cpu_seconds": 0.0,
+        "cpu_mean_millicores": 0.0,
+        "cpu_peak_millicores": 0.0,
+        "rss_slope_mib_per_min": 0.0,
+        "fds_max": 27,
+        "threads_max": 17
+      },
+      "reconciles": 0.0,
+      "reconcile_errors": 0.0,
+      "reconcile_p95_secs": null,
+      "api_requests": 15.988859375333334,
+      "api_requests_per_min": 31.94213321894218,
+      "api_top": [
+        [
+          "PUT leases",
+          7.0
+        ],
+        [
+          "GET leases",
+          6.0
+        ],
+        [
+          "GET ",
+          2.0
+        ],
+        [
+          "GET endpoints",
+          1.0
+        ],
+        [
+          "GET endpointslices",
+          1.0
+        ]
+      ],
+      "objects": null,
+      "convergence_secs": null
+    },
+    {
+      "name": "cycle churn",
+      "kind": "load",
+      "wall_secs": 16.743568691,
+      "usage": {
+        "samples": 67,
+        "rss_peak_mib": 57.83984375,
+        "rss_median_mib": 57.83984375,
+        "cpu_seconds": 3.0,
+        "cpu_mean_millicores": 181.81778257938905,
+        "cpu_peak_millicores": 2836.0205866654537,
+        "rss_slope_mib_per_min": 0.05836635059927877,
+        "fds_max": 27,
+        "threads_max": 17
+      },
+      "reconciles": 803.0,
+      "reconcile_errors": 602.0,
+      "reconcile_p95_secs": 0.0048159722222222215,
+      "api_requests": 1677.4188104363334,
+      "api_requests_per_min": 6010.972361004422,
+      "api_top": [
+        [
+          "PATCH angosrepositories",
+          1000.0
+        ],
+        [
+          "PATCH events",
+          804.0
+        ],
+        [
+          "LIST angosrepositories",
+          36.0
+        ],
+        [
+          "GET secrets",
+          13.0
+        ],
+        [
+          "GET deployments",
+          12.0
+        ],
+        [
+          "PATCH angoslocalinstances",
+          5.0
+        ],
+        [
+          "PUT leases",
+          4.0
+        ],
+        [
+          "APPLY secrets",
+          4.0
+        ]
+      ],
+      "objects": 200,
+      "convergence_secs": 16.711500469
+    },
+    {
+      "name": "cycle delete",
+      "kind": "load",
+      "wall_secs": 16.326368249,
+      "usage": {
+        "samples": 65,
+        "rss_peak_mib": 58.37109375,
+        "rss_median_mib": 58.37109375,
+        "cpu_seconds": 1.3500000000000014,
+        "cpu_mean_millicores": 84.37109460440706,
+        "cpu_peak_millicores": 2439.0804666640797,
+        "rss_slope_mib_per_min": 0.2008654303537973,
+        "fds_max": 27,
+        "threads_max": 17
+      },
+      "reconciles": 204.0,
+      "reconcile_errors": 2.0,
+      "reconcile_p95_secs": 0.0048693467336683414,
+      "api_requests": 1094.5578772503334,
+      "api_requests_per_min": 4022.540202046621,
+      "api_top": [
+        [
+          "PATCH angosrepositories",
+          800.0
+        ],
+        [
+          "POST events",
+          400.0
+        ],
+        [
+          "DELETE angosrepositories",
+          200.0
+        ],
+        [
+          "LIST angoslocalinstances",
+          31.0
+        ],
+        [
+          "GET secrets",
+          17.0
+        ],
+        [
+          "GET deployments",
+          16.0
+        ],
+        [
+          "LIST angosrepositories",
+          6.0
+        ],
+        [
+          "PATCH angoslocalinstances",
+          6.0
+        ]
+      ],
+      "objects": 200,
+      "convergence_secs": 16.292575642
+    },
+    {
+      "name": "final",
+      "kind": "idle",
+      "wall_secs": 30.037737886,
+      "usage": {
+        "samples": 120,
+        "rss_peak_mib": 58.37109375,
+        "rss_median_mib": 58.37109375,
+        "cpu_seconds": 0.0,
+        "cpu_mean_millicores": 0.0,
+        "cpu_peak_millicores": 0.0,
+        "rss_slope_mib_per_min": 0.0,
+        "fds_max": 27,
+        "threads_max": 17
+      },
+      "reconciles": 0.0,
+      "reconcile_errors": 0.0,
+      "reconcile_p95_secs": null,
+      "api_requests": 15.987420704666668,
+      "api_requests_per_min": 31.934669844998062,
+      "api_top": [
+        [
+          "PUT leases",
+          7.0
+        ],
+        [
+          "GET leases",
+          6.0
+        ],
+        [
+          "GET ",
+          2.0
+        ],
+        [
+          "GET endpoints",
+          1.0
+        ],
+        [
+          "GET endpointslices",
+          1.0
+        ]
+      ],
+      "objects": null,
+      "convergence_secs": null
+    }
+  ],
+  "measured_at": "2026-10-16T15:02:17.819182256Z",
+  "kit_version": "0.17.0"
+}

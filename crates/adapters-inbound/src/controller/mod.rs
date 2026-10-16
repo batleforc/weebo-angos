@@ -166,7 +166,8 @@ where
 pub fn requeue_after(outcome: &Outcome) -> Action {
     match &outcome.ready {
         // A reload being confirmed (its logs), an upgrade's Job (not
-        // watched): read again soon.
+        // watched): read again soon. A rollout's progress comes through the
+        // Deployment and pod watches: the steady interval is the fallback.
         Err(f)
             if matches!(
                 f.reason,
@@ -174,6 +175,9 @@ pub fn requeue_after(outcome: &Outcome) -> Action {
             ) =>
         {
             weebo_kit_runtime::controller::requeue_after(false, Some(15))
+        }
+        Err(f) if f.reason == ReasonCode::WorkloadNotReady => {
+            weebo_kit_runtime::controller::requeue_after(true, None)
         }
         Err(f) => weebo_kit_runtime::controller::requeue_after(f.reason.needs_a_change(), None),
         Ok(_)
@@ -186,6 +190,31 @@ pub fn requeue_after(outcome: &Outcome) -> Action {
         }
         Ok(_) => weebo_kit_runtime::controller::requeue_after(true, None),
     }
+}
+
+/// [`requeue_after`] for what waits on its instance (a repository, an
+/// identity): the instance's status changes wake it through the watch, the
+/// steady interval is the fallback.
+pub fn requeue_waiting(outcome: &Outcome) -> Action {
+    match &outcome.ready {
+        Err(f)
+            if matches!(
+                f.reason,
+                ReasonCode::ConfigPropagating | ReasonCode::WorkloadNotReady
+            ) =>
+        {
+            weebo_kit_runtime::controller::requeue_after(true, None)
+        }
+        _ => requeue_after(outcome),
+    }
+}
+
+/// A hash of `value`'s JSON: what a watch predicate compares.
+pub fn hash_of<T: serde::Serialize>(value: &T) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    serde_json::to_string(value).ok()?.hash(&mut hasher);
+    Some(hasher.finish())
 }
 
 /// `<prefix>_reconcile_total` / `_duration_seconds` (the kit's

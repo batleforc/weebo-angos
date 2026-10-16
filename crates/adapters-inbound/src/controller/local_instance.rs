@@ -47,6 +47,19 @@ fn instance_of<K: Resource>(object: &K) -> Option<ObjectRef<LocalInstance>> {
     Some(ObjectRef::new(name).within(object.meta().namespace.as_deref()?))
 }
 
+/// What of a repository or an identity the instance renders: its spec
+/// (generation), its annotations, its deletion and `status` — not its
+/// conditions, which it writes on every pass.
+fn bound_change<K: Resource, S: serde::Serialize>(object: &K, status: S) -> Option<u64> {
+    let meta = object.meta();
+    super::hash_of(&(
+        meta.generation,
+        &meta.annotations,
+        meta.deletion_timestamp.is_some(),
+        status,
+    ))
+}
+
 pub async fn run(client: Client, ctx: Arc<Ctx>) {
     let health = ctx.health.clone();
     let owned = watcher::Config::default()
@@ -67,17 +80,48 @@ pub async fn run(client: Client, ctx: Arc<Ctx>) {
             |p| instance_of(&p),
         )
         // A repository bound to an instance (or no longer) re-renders it.
-        .watches(
-            ctx.scope.api::<api::Repository>(client.clone()),
-            ctx.scope.watcher_config(),
+        .watches_stream(
+            watcher(
+                ctx.scope.api::<api::Repository>(client.clone()),
+                ctx.scope.watcher_config(),
+            )
+            .default_backoff()
+            .touched_objects()
+            .predicate_filter(
+                |repo: &api::Repository| {
+                    // `rendered` and `conflictWith` come from the instance.
+                    bound_change(repo, repo.status.as_ref().map(|s| &s.common.instance))
+                },
+                Default::default(),
+            ),
             |repo| {
                 let bound = repo.status.as_ref()?.common.instance.clone()?;
                 Some(ObjectRef::new(&bound.name).within(bound.namespace.as_deref()?))
             },
         )
-        .watches(
-            ctx.scope.api::<api::Identity>(client.clone()),
-            ctx.scope.watcher_config(),
+        .watches_stream(
+            watcher(
+                ctx.scope.api::<api::Identity>(client.clone()),
+                ctx.scope.watcher_config(),
+            )
+            .default_backoff()
+            .touched_objects()
+            .predicate_filter(
+                |identity: &api::Identity| {
+                    // Its status without the conditions: the password version
+                    // it holds is what the instance renders.
+                    let status = identity.status.as_ref().map(|s| {
+                        let mut s = serde_json::to_value(s).unwrap_or_default();
+                        if let Some(m) = s.as_object_mut() {
+                            m.remove("conditions");
+                            m.remove("observedGeneration");
+                        }
+                        s
+                    });
+                    bound_change(identity, status)
+                },
+                Default::default(),
+            ),
             |identity| {
                 let bound = identity.status.as_ref()?.common.instance.clone()?;
                 Some(ObjectRef::new(&bound.name).within(bound.namespace.as_deref()?))
