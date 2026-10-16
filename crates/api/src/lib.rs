@@ -49,6 +49,9 @@ pub mod annotations {
     pub const RUN_NOW: &str = "angos.weebo.io/run-now";
     /// On an instance: the Angos tag allowed off the N → N+1 path.
     pub const APPROVED_UPGRADE: &str = "angos.weebo.io/approved-upgrade";
+    /// On an instance: `"true"` runs `replicas > 1` on a store whose
+    /// conditional writes Angos found not atomic.
+    pub const ALLOW_ADVISORY_CLAIMS: &str = "angos.weebo.io/allow-advisory-claims";
     /// On the pod template: when the operator rolled the pods (a reload
     /// that wasn't confirmed, `onUnconfirmed: Rollout`).
     pub const RESTARTED_AT: &str = "angos.weebo.io/restarted-at";

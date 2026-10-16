@@ -105,6 +105,25 @@ pub fn watcher_failure(lines: &[LogLine]) -> Option<String> {
     })
 }
 
+/// The target of the job queue's startup probe (what `RUST_LOG` must let
+/// through at `warn`).
+pub const JOB_STORE_TARGET: &str = "angos::jobs::store";
+/// What a server or worker starting with `[global.job_queue]` logs when its
+/// metadata store accepted a second `create_if_absent` of the same key
+/// (`src/jobs/store.rs:184-209`): claims become advisory.
+pub const ADVISORY_CLAIMS: &str = "job queue: the metadata store's backend did not enforce atomic";
+
+/// Whether Angos's own probe found the store's conditional writes not
+/// atomic, in the start of the log of a pod that got past it (a ready
+/// server with the durable queue).
+pub fn advisory_claims(lines: &[LogLine]) -> bool {
+    lines.iter().any(|line| {
+        serde_json::from_str::<Entry>(&line.text).is_ok_and(|entry| {
+            entry.target == JOB_STORE_TARGET && entry.fields.message.starts_with(ADVISORY_CLAIMS)
+        })
+    })
+}
+
 /// How much of a pod's log, from its start, is read for its watcher's
 /// failure.
 pub const STARTUP_LOG_BYTES: i64 = 64 * 1024;
@@ -225,6 +244,28 @@ mod tests {
 
     const W: &str = WATCHER_TARGET;
     const NOTIFIER: &str = "angos::command::server::command::notifier";
+
+    #[test]
+    fn angos_s_claim_probe_is_read_in_the_startup_log() {
+        let started = [line(
+            "2026-10-16T10:00:00Z",
+            "INFO",
+            "angos::command::bootstrap",
+            "Using S3 storage backend",
+        )];
+        assert!(!advisory_claims(&started));
+        // The real 1.12.3 message, one line.
+        let advisory = [line(
+            "2026-10-16T10:00:01Z",
+            "WARN",
+            JOB_STORE_TARGET,
+            "job queue: the metadata store's backend did not enforce atomic create-if-absent; \
+             falling back to advisory claims: claim races admit multiple workers, so idempotent \
+             jobs may execute more than once until the losing claimants self-cancel within a \
+             refresh period",
+        )];
+        assert!(advisory_claims(&advisory));
+    }
 
     #[test]
     fn the_last_reload_after_the_write_counts() {

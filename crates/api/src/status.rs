@@ -45,6 +45,14 @@ pub struct InstanceStatus {
     pub version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub available_replicas: Option<i32>,
+    /// The worker's available pods.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available_workers: Option<i32>,
+    /// What Angos found of the metadata store's conditional writes when the
+    /// durable queue started: more than one server pod runs only on a store
+    /// found atomic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conditional_writes: Option<ConditionalWrites>,
     /// The hash of the startup layer the pods run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub boot_hash: Option<String>,
@@ -98,6 +106,22 @@ pub struct InstanceStatus {
     /// When the operator last rolled the pods for an unconfirmed reload.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rolled_out_for: Option<String>,
+}
+
+/// Angos's own probe of the store (`create_if_absent` twice), read in the
+/// startup log of a server pod running the durable queue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConditionalWrites {
+    /// The store probed (endpoint, bucket, prefix), as the startup layer
+    /// names it.
+    pub store: String,
+    /// `true`: a second create of the same key failed (`If-None-Match: *`
+    /// honoured); `false`: Angos fell back to advisory claims.
+    pub atomic: bool,
+    /// The pod read, and when.
+    pub pod: String,
+    pub observed_time: String,
 }
 
 /// A pod's answer to a hot layer.

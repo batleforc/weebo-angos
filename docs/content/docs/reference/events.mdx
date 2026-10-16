@@ -14,7 +14,7 @@ CR is deleted.
 | --- | --- | --- | --- | --- |
 | A reconcile ends on `Ready: False` — every time, not only the first | `Warning` | the failure's code | `Reconcile` | the condition's message |
 | `Ready` turns `True`, or stays `True` with another reason | `Normal` | `Reconciled` | `Reconcile` | the condition's message |
-| An advisory condition appears or changes | `Normal` | `StorageChangePending`, `DisruptiveUpdatePending`, `ReloadUnconfirmed`, `MaintenanceSkipped`, `MaintenanceDeferred`, `MaintenanceRunning`, `MaintenanceSuspended`, `ExtraConfigUsed`, `RuleMayFail`, `IndexMemoryRisk`, `GcGraceLowered`, `VolumeNotResized`, `StorageCredentialsRotated`, `IssuerDiscoveryNotBound` | `Reconcile` | its message |
+| An advisory condition appears or changes | `Normal` | `StorageChangePending`, `DisruptiveUpdatePending`, `ReplicasHeld`, `ReloadUnconfirmed`, `MaintenanceSkipped`, `MaintenanceDeferred`, `MaintenanceRunning`, `MaintenanceSuspended`, `ExtraConfigUsed`, `RuleMayFail`, `IndexMemoryRisk`, `GcGraceLowered`, `VolumeNotResized`, `StorageCredentialsRotated`, `IssuerDiscoveryNotBound` | `Reconcile` | its message |
 | An advisory condition goes away | `Normal` | its code | `Reconcile` | `<type> no longer applies: <message>` |
 | A reconcile stops before writing a status (Kubernetes API call, finalizer…) | `Warning` | `KubernetesApiError` | `Reconcile` | the error |
 | A finalizer cleanup fails | `Warning` | the failure's code | `Cleanup` | the error |

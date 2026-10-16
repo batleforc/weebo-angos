@@ -62,7 +62,7 @@ spec:
 | `priorityClassName` | `string` | no |  |  |
 | `pruneLock` | `object` | no | `{"windowHours":24}` | The prune lock (spec 6.6): no `AngosMaintenance` prune runs while a repository was released less than `windowHours` ago (its data goes at the next prune: time to notice and recreate it). |
 | `reload` | `object` | no | `{"mode":"Hot","onUnconfirmed":"Wait","timeoutSeconds":180}` | How a new configuration reaches the pods. |
-| `replicas` | `integer` | no | `1` | One replica until the worker and the shared-store checks land. |
+| `replicas` | `integer` | no | `1` | The server's pods. More than one needs an S3 store and `worker.enabled`, and runs once Angos found the store's conditional writes atomic (`status.conditionalWrites`); until then, one. |
 | `repositorySelector` | `object` | no |  | Which `AngosRepository`s (and `AngosIdentity`s) the instance serves, and from which namespaces. |
 | `resources` | `object` | no |  | Unset: requests 100m CPU / 256Mi, limit 1Gi. |
 | `securityContext` | `object` | no |  | Unset: read-only root filesystem, no capability, no escalation. |
@@ -74,6 +74,7 @@ spec:
 | `tolerations` | `object[]` | no |  |  |
 | `tracing` | `object` | no |  | `[observability.tracing]`: OTLP traces. Startup only. |
 | `ui` | `object` | no |  | `[ui]`: Angos's web UI. |
+| `worker` | `object` | no |  | `angos worker`: a `<name>-worker` Deployment draining the background jobs (cache fills, replication, scans, indexes) from a durable queue (`[global.job_queue]`) instead of the server's own loops. |
 
 ## Build a manifest
 
