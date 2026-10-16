@@ -19,7 +19,10 @@
 //! 7. the hot layer's confirmation, pod by pod, from their logs: applied
 //!    (`ConfigReloaded`, copied to `<name>-config-applied`), refused
 //!    (`ConfigRejected`, the accepted one put back) or pending
-//!    (`ConfigPropagating`; past `reload.timeoutSeconds`, `Wait` or roll).
+//!    (`ConfigPropagating`; past `reload.timeoutSeconds`, `Wait` or roll);
+//! 8. an Angos upgrade moves on (spec 6.8): its steps' `Job`s run once the
+//!    pods are settled, the pods stay on the old version until the store
+//!    is scrubbed (`UpgradeInProgress`, `UpgradeFailed`).
 
 use std::collections::BTreeMap;
 
@@ -39,7 +42,9 @@ use crate::ports::{
 };
 use crate::reload::{self, Confirmation, LOG_SLACK};
 use crate::render::{self, Rendered, Resolved, paths};
+use crate::upgrade::{self, StepState};
 use crate::workload::{self, Role, WorkloadInput, boot_secret, role_selector, selector};
+use api::status::{Upgrade, UpgradeStep};
 
 /// A refused hot layer is tried again after this long even if nothing
 /// changed (a JWKS unreachable for a while…).
@@ -72,6 +77,8 @@ pub struct InstancePass<'a> {
 /// What a pass needs.
 pub struct InstancePorts<'a> {
     pub objects: &'a dyn OwnedObjects,
+    pub jobs: &'a dyn crate::ports::Jobs,
+    pub maintenances: &'a dyn crate::ports::MaintenanceDirectory,
     pub logs: &'a dyn PodLogs,
     pub credentials: &'a dyn Credentials,
     pub issuer: &'a dyn ClusterIssuer,
@@ -131,6 +138,7 @@ pub fn status_fields(status: &InstanceStatus) -> serde_json::Map<String, serde_j
         "repositories",
         "identities",
         "releasedRepositories",
+        "upgrade",
     ] {
         map.entry(key).or_insert(serde_json::Value::Null);
     }
@@ -868,6 +876,76 @@ async fn run(
         .rollout(owner, &names.workload())
         .await
         .map_err(workload_failure)?;
+    // The Angos version (spec 6.8): a tag the operator runs; an upgrade
+    // keeps the pods on the old one until the store is scrubbed.
+    let to = workload::tag(&image).to_string();
+    upgrade::check(
+        status.version.as_deref(),
+        &to,
+        pass.annotations
+            .get(annotations::APPROVED_UPGRADE)
+            .map(String::as_str),
+    )
+    .map_err(|m| Failure::new(ReasonCode::UpgradeNotAllowed, m))?;
+    let running_image = running
+        .as_ref()
+        .and_then(|r| r.annotation(workload::IMAGE_ANNOTATION))
+        .map(String::from);
+    let running_tag = running_image
+        .as_deref()
+        .map(|i| workload::tag(i).to_string());
+    status.upgrade = match (status.upgrade.take(), &running_tag) {
+        // Back to the running version before the pods moved: abandoned.
+        (Some(u), Some(r)) if *r == to && upgrade::before_rollout(u.step) => None,
+        (Some(u), _) if u.to == to => Some(u),
+        (_, Some(r)) if *r != to && status.version.is_some() => {
+            let instance = upgrade::instance_of(&owner.name, spec);
+            Some(Upgrade {
+                from: r.clone(),
+                to: to.clone(),
+                step: upgrade::first_step(&instance),
+                since: pass.now.to_string(),
+                job: None,
+                failure: None,
+                attempt: 0,
+                retried: None,
+            })
+        }
+        _ => None,
+    };
+    if let Some(up) = status.upgrade.as_mut()
+        && up.failure.is_some()
+        && let Some(retry) = pass.annotations.get(annotations::RETRY_UPGRADE)
+        && up.retried.as_ref() != Some(retry)
+    {
+        up.failure = None;
+        up.job = None;
+        up.attempt += 1;
+        up.retried = Some(retry.clone());
+        up.since = pass.now.to_string();
+    }
+    if status
+        .upgrade
+        .as_ref()
+        .is_some_and(|u| upgrade::before_rollout(u.step))
+        && let Some(running) = running.as_ref()
+        && let (Some(running_boot), Some(running_image)) = (
+            running.annotation(annotations::BOOT_HASH),
+            running_image.as_ref(),
+        )
+        && let Some(file) = ports
+            .objects
+            .secret_text(owner, &boot_secret(&owner.name, running_boot), paths::FILE)
+            .await
+            .map_err(workload_failure)?
+    {
+        boot = Boot {
+            file,
+            hash: running_boot.to_string(),
+            pending: boot.pending,
+        };
+        image = running_image.clone();
+    }
     let consent = pass
         .annotations
         .get(&api::ANNOTATIONS.key(weebo_kit_api_annotations::ALLOW_DISRUPTIVE_UPDATE))
@@ -1312,6 +1390,9 @@ async fn run(
             ),
         ));
     }
+    // 8. The upgrade, the pods settled.
+    drive_upgrade(pass, ports, status, &boot.hash, &image, events, advisories).await?;
+
     // Every pod runs what was rendered this pass: what it holds is
     // confirmed, for the identities' targets and the repositories' status.
     for render in status.repositories.values_mut() {
@@ -1329,6 +1410,132 @@ async fn run(
         status.version.clone().unwrap_or_default(),
         status.endpoint.clone().unwrap_or_default()
     ))
+}
+
+/// Moves the upgrade on, the pods running what the pass applied (`image`
+/// and the startup layer `boot_hash`: the old ones before the rollout).
+/// `Err` while it isn't over.
+async fn drive_upgrade(
+    pass: &InstancePass<'_>,
+    ports: &InstancePorts<'_>,
+    status: &mut InstanceStatus,
+    boot_hash: &str,
+    image: &str,
+    events: &mut Vec<(ReasonCode, String)>,
+    advisories: &mut Vec<Advisory>,
+) -> Result<(), Failure> {
+    let Some(mut up) = status.upgrade.clone() else {
+        return Ok(());
+    };
+    let owner = pass.owner;
+    let instance = upgrade::instance_of(&owner.name, pass.spec);
+    let what = format!("Angos {} → {}", up.from, up.to);
+    if let Some(failure) = &up.failure {
+        return Err(Failure::new(
+            ReasonCode::UpgradeFailed,
+            format!(
+                "{what}: {:?} failed: {failure}. The pods stay on {}; kubectl annotate \
+                 angoslocalinstance {} {}=<a new value> --overwrite to try it again",
+                up.step,
+                up.from,
+                owner.name,
+                annotations::RETRY_UPGRADE
+            ),
+        ));
+    }
+    if let Some(why) = crate::maintenance::unreachable_store(&instance) {
+        advisories.push(advisory(
+            ReasonCode::UpgradeUnchecked,
+            format!("{what} without its scrub: {why}"),
+        ));
+    }
+    let in_progress = |status: &mut InstanceStatus, up: Upgrade, message: String| {
+        status.upgrade = Some(up);
+        Err(Failure::new(ReasonCode::UpgradeInProgress, message))
+    };
+    loop {
+        let step = up.step;
+        if step == UpgradeStep::Rollout {
+            if workload::tag(image) != up.to {
+                return in_progress(status, up, format!("{what}: the pods roll"));
+            }
+        } else {
+            if step == UpgradeStep::Scrub {
+                let others = ports
+                    .maintenances
+                    .in_namespace(&owner.namespace)
+                    .await
+                    .map_err(|e| Failure::new(ReasonCode::KubernetesApiError, e))?;
+                let bound = weebo_kit_api::BoundInstance::local(&owner.namespace, &owner.name);
+                if let Some(other) = crate::maintenance::writer_running(&others, "", &bound) {
+                    return in_progress(
+                        status,
+                        up,
+                        format!("{what}: the scrub waits for the maintenance {other}"),
+                    );
+                }
+            }
+            let name = upgrade::job_name(&owner.name, &up.to, step, up.attempt);
+            let job = ports
+                .jobs
+                .job(&owner.namespace, &name)
+                .await
+                .map_err(|e| Failure::new(ReasonCode::KubernetesApiError, e))?;
+            match upgrade::state(&name, job.as_ref()) {
+                StepState::Absent => {
+                    if let Some(job) =
+                        upgrade::job(&instance, &owner.namespace, step, &name, image, boot_hash)
+                    {
+                        ports
+                            .objects
+                            .apply(owner, &[job])
+                            .await
+                            .map_err(workload_failure)?;
+                    }
+                    up.job = Some(name.clone());
+                    return in_progress(status, up, format!("{what}: {step:?} (Job {name})"));
+                }
+                StepState::Running => {
+                    return in_progress(status, up, format!("{what}: {step:?} (Job {name})"));
+                }
+                StepState::Failed(why) => {
+                    up.failure = Some(why.clone());
+                    status.upgrade = Some(up.clone());
+                    return Err(Failure::new(
+                        ReasonCode::UpgradeFailed,
+                        format!(
+                            "{what}: {step:?} failed: {why}. The pods stay on {}; kubectl \
+                             annotate angoslocalinstance {} {}=<a new value> --overwrite to try \
+                             it again",
+                            up.from,
+                            owner.name,
+                            annotations::RETRY_UPGRADE
+                        ),
+                    ));
+                }
+                StepState::Done => {}
+            }
+        }
+        match upgrade::next(step, &instance) {
+            Some(next) => {
+                up.step = next;
+                up.since = pass.now.to_string();
+                up.job = None;
+                up.attempt = 0;
+                up.retried = None;
+                if next == UpgradeStep::Rollout {
+                    return in_progress(status, up, format!("{what}: the pods roll"));
+                }
+            }
+            None => break,
+        }
+    }
+    status.upgrade = None;
+    events.push((
+        ReasonCode::Upgraded,
+        format!("{what}: the store scrubbed, the pods rolled, the new version checked it"),
+    ));
+    Ok(())
 }
 
 /// Every ready pod runs `file`: it is the accepted one.

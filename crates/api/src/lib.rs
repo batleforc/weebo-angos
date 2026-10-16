@@ -52,6 +52,8 @@ pub mod annotations {
     /// On an instance: `"true"` runs `replicas > 1` on a store whose
     /// conditional writes Angos found not atomic.
     pub const ALLOW_ADVISORY_CLAIMS: &str = "angos.weebo.io/allow-advisory-claims";
+    /// On an instance: a changed value runs a failed upgrade step again.
+    pub const RETRY_UPGRADE: &str = "angos.weebo.io/retry-upgrade";
     /// On the pod template: when the operator rolled the pods (a reload
     /// that wasn't confirmed, `onUnconfirmed: Rollout`).
     pub const RESTARTED_AT: &str = "angos.weebo.io/restarted-at";
@@ -65,8 +67,11 @@ pub mod angos {
     pub const IMAGE_REPOSITORY: &str = "ghcr.io/project-angos/angos";
     /// The version targeted: the default tag.
     pub const VERSION: &str = "1.12.3";
-    /// The tags an instance may run.
-    pub const SUPPORTED_VERSIONS: &[&str] = &["1.12.3"];
+    /// The tags an instance may run: their configuration model, startup
+    /// keys and log messages are those of [`VERSION`] (1.12.2 differs only
+    /// in the job queue's file names, which the orchestrated upgrade's
+    /// scrub covers).
+    pub const SUPPORTED_VERSIONS: &[&str] = &["1.12.2", "1.12.3"];
 }
 
 pub use identity::Identity;

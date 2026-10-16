@@ -480,6 +480,59 @@ hot="$(kubectl -n team-a get secret secure-config -o jsonpath='{.data.config\.to
 printf '%s' "$hot" | grep -q '^\[global.scan\]' || fail "secure: no [global.scan]"
 printf '%s' "$hot" | grep -q '^\[event_webhook.audit\]' || fail "secure: no [event_webhook.audit]"
 
+step "an Angos upgrade, 1.12.2 → 1.12.3: scrubbed on the old version, checked on the new"
+kubectl apply -f - <<'YAML'
+apiVersion: angos.weebo.io/v1alpha1
+kind: AngosLocalInstance
+metadata:
+  name: upgrade
+  namespace: team-a
+spec:
+  image: { tag: "1.12.2" }
+  storage:
+    s3:
+      endpoint: http://rustfs.team-a.svc:9000
+      bucket: registry
+      region: us-east-1
+      keyPrefix: upgrade
+      credentialsSecretRef: { name: rustfs }
+YAML
+up() { kubectl -n team-a get angoslocalinstance upgrade -o jsonpath="$1"; }
+for _ in $(seq 1 90); do
+  [ "$(up '{.status.conditions[?(@.type=="Ready")].reason}')" = Reconciled ] && break
+  sleep 2
+done
+[ "$(up '{.status.version}')" = 1.12.2 ] || fail "upgrade: not running 1.12.2 ($(up '{.status.conditions}'))"
+# Backwards, then too far: refused at admission.
+if kubectl -n team-a patch angoslocalinstance upgrade --type merge \
+  -p '{"spec":{"image":{"tag":"1.12.1"}}}' 2>/dev/null; then
+  fail "upgrade: a downgrade to an untested version was admitted"
+fi
+kubectl -n team-a patch angoslocalinstance upgrade --type merge -p '{"spec":{"image":{"tag":"1.12.3"}}}'
+steps=""
+for _ in $(seq 1 300); do
+  step="$(up '{.status.upgrade.step}')"
+  case " $steps " in *" $step "*) ;; *) [ -n "$step" ] && steps="$steps $step" ;; esac
+  failure="$(up '{.status.upgrade.failure}')"
+  [ -n "$failure" ] && fail "upgrade: $step failed: $failure"
+  if [ -z "$step" ] && [ "$(up '{.status.version}')" = 1.12.3 ] \
+    && [ "$(up '{.status.conditions[?(@.type=="Ready")].reason}')" = Reconciled ]; then
+    break
+  fi
+  sleep 2
+done
+echo "upgrade steps seen:$steps"
+[ "$(up '{.status.version}')" = 1.12.3 ] || fail "upgrade: never reached 1.12.3 ($(up '{.status.conditions}'))"
+[ -z "$(up '{.status.upgrade}')" ] || fail "upgrade: still in progress: $(up '{.status.upgrade}')"
+# Each step's Job ran on its version.
+for job in $(kubectl -n team-a get jobs -l app.kubernetes.io/instance=upgrade-upgrade -o name); do
+  kubectl -n team-a get "$job" -o jsonpath='{.status.succeeded}{" "}{.spec.template.spec.containers[0].image}{" "}{.spec.template.spec.containers[0].args}{"\n"}'
+done
+[ "$(kubectl -n team-a get jobs -l app.kubernetes.io/instance=upgrade-upgrade -o name | wc -l)" -eq 4 ] \
+  || fail "upgrade: expected 4 Jobs (scrub -d, scrub, verify, reconcile index)"
+kubectl -n team-a get events --field-selector reason=Upgraded -o name | grep -q . \
+  || fail "upgrade: no Upgraded Event"
+
 step "the webhook refuses what the operator wouldn't run"
 if kubectl apply -f - 2>/dev/null <<'YAML'
 apiVersion: angos.weebo.io/v1alpha1

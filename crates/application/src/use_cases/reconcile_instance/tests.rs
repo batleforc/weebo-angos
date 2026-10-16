@@ -6,8 +6,8 @@ use weebo_kit_application::workload::{OwnedObjects, PodState};
 
 use super::*;
 use crate::test_support::{
-    CountingKeys, FakeCel, FakeCredentials, FakeIdentities, FakeIssuer, FakeLedger,
-    FakeOwnedObjects, FakePodLogs, FakeRepositories,
+    CountingKeys, FakeCel, FakeCredentials, FakeIdentities, FakeIssuer, FakeJobs, FakeLedger,
+    FakeMaintenances, FakeOwnedObjects, FakePodLogs, FakeRepositories,
 };
 use api::status::PodReloadState;
 
@@ -22,6 +22,8 @@ struct World {
     status: InstanceStatus,
     now: Timestamp,
     objects: FakeOwnedObjects,
+    jobs: FakeJobs,
+    maintenances: FakeMaintenances,
     logs: FakePodLogs,
     credentials: FakeCredentials,
     issuer: FakeIssuer,
@@ -45,6 +47,8 @@ impl World {
             status: InstanceStatus::default(),
             now: "2026-10-16T10:00:00Z".parse().unwrap(),
             objects: FakeOwnedObjects::default(),
+            jobs: FakeJobs::default(),
+            maintenances: FakeMaintenances::default(),
             logs: FakePodLogs::default(),
             credentials: FakeCredentials::default(),
             issuer: FakeIssuer(Some("https://kubernetes.default.svc.cluster.local".into())),
@@ -74,6 +78,8 @@ impl World {
             },
             &InstancePorts {
                 objects: &self.objects,
+                jobs: &self.jobs,
+                maintenances: &self.maintenances,
                 logs: &self.logs,
                 credentials: &self.credentials,
                 issuer: &self.issuer,
@@ -992,5 +998,159 @@ async fn advisory_claims_hold_the_replicas_unless_allowed() {
     assert_eq!(
         world.objects.object("Deployment", "reg").unwrap().manifest["spec"]["replicas"],
         2
+    );
+}
+
+fn job_done(world: &World, name: &str, succeeded: bool) {
+    world.jobs.0.lock().unwrap().insert(
+        name.to_string(),
+        crate::ports::JobState {
+            active: false,
+            succeeded,
+            failed: !succeeded,
+            deadline_exceeded: false,
+            pod: None,
+            exit_code: (!succeeded).then_some(2),
+        },
+    );
+}
+
+fn server_image(world: &World) -> String {
+    world.objects.object("Deployment", "reg").unwrap().manifest["spec"]["template"]["spec"]
+        ["containers"][0]["image"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// The Job of the step the upgrade is at, its image and arguments.
+fn upgrade_job(world: &World) -> (String, String, Vec<String>) {
+    let name = world.status.upgrade.as_ref().unwrap().job.clone().unwrap();
+    let job = world.objects.object("Job", &name).unwrap().manifest;
+    let container = &job["spec"]["template"]["spec"]["containers"][0];
+    (
+        name,
+        container["image"].as_str().unwrap().to_string(),
+        serde_json::from_value(container["args"].clone()).unwrap(),
+    )
+}
+
+#[tokio::test]
+async fn an_upgrade_scrubs_on_the_old_version_then_checks_on_the_new() {
+    let mut world = s3_world(json!({"image": {"tag": "1.12.2"}}));
+    running(&mut world).await;
+    assert_eq!(world.status.version.as_deref(), Some("1.12.2"));
+    world.spec.image.tag = Some("1.12.3".into());
+
+    // The dry run, then the scrub, on 1.12.2: the pods don't move.
+    let mut seen = Vec::new();
+    for step in [UpgradeStep::ScrubDryRun, UpgradeStep::Scrub] {
+        let report = world.pass().await;
+        assert_eq!(
+            reason(&report),
+            ReasonCode::UpgradeInProgress,
+            "{:?}",
+            report.outcome
+        );
+        assert_eq!(world.status.upgrade.as_ref().unwrap().step, step);
+        let (name, image, args) = upgrade_job(&world);
+        assert_eq!(image, "ghcr.io/project-angos/angos:1.12.2");
+        assert_eq!(args[4], "scrub");
+        assert_eq!(
+            args.get(5).map(String::as_str) == Some("-d"),
+            step == UpgradeStep::ScrubDryRun
+        );
+        assert_eq!(server_image(&world), "ghcr.io/project-angos/angos:1.12.2");
+        // Running: nothing moves.
+        assert_eq!(reason(&world.pass().await), ReasonCode::UpgradeInProgress);
+        job_done(&world, &name, true);
+        seen.push(name);
+    }
+    // The rollout.
+    let rolling = world.pass().await;
+    assert_eq!(
+        world.status.upgrade.as_ref().unwrap().step,
+        UpgradeStep::Rollout
+    );
+    assert_eq!(reason(&rolling), ReasonCode::UpgradeInProgress);
+    world.pass().await;
+    assert_eq!(server_image(&world), "ghcr.io/project-angos/angos:1.12.3");
+    assert_eq!(world.status.version.as_deref(), Some("1.12.3"));
+    // The checks, on 1.12.3.
+    for (step, task) in [
+        (UpgradeStep::Verify, "scrub"),
+        (UpgradeStep::ReconcileIndex, "reconcile"),
+    ] {
+        assert_eq!(world.status.upgrade.as_ref().unwrap().step, step);
+        let (name, image, args) = upgrade_job(&world);
+        assert_eq!(image, "ghcr.io/project-angos/angos:1.12.3");
+        assert_eq!(args[4], task);
+        job_done(&world, &name, true);
+        let report = world.pass().await;
+        if step == UpgradeStep::ReconcileIndex {
+            assert_eq!(
+                reason(&report),
+                ReasonCode::Reconciled,
+                "{:?}",
+                report.outcome
+            );
+            assert!(
+                report
+                    .events
+                    .iter()
+                    .any(|(r, _)| *r == ReasonCode::Upgraded)
+            );
+        }
+    }
+    assert!(world.status.upgrade.is_none());
+}
+
+#[tokio::test]
+async fn a_failed_step_holds_the_old_version_until_retried() {
+    let mut world = s3_world(json!({"image": {"tag": "1.12.2"}}));
+    running(&mut world).await;
+    world.spec.image.tag = Some("1.12.3".into());
+    world.pass().await;
+    let (first, _, _) = upgrade_job(&world);
+    job_done(&world, &first, false);
+    let failed = world.pass().await;
+    assert_eq!(reason(&failed), ReasonCode::UpgradeFailed);
+    assert!(format!("{:?}", failed.outcome).contains("retry-upgrade"));
+    // Stays failed, and on 1.12.2.
+    assert_eq!(reason(&world.pass().await), ReasonCode::UpgradeFailed);
+    assert_eq!(server_image(&world), "ghcr.io/project-angos/angos:1.12.2");
+    world
+        .annotations
+        .insert(annotations::RETRY_UPGRADE.into(), "1".into());
+    let retried = world.pass().await;
+    assert_eq!(reason(&retried), ReasonCode::UpgradeInProgress);
+    let (second, _, _) = upgrade_job(&world);
+    assert_ne!(first, second);
+    // Back to 1.12.2 before the rollout: abandoned.
+    world.spec.image.tag = Some("1.12.2".into());
+    let back = world.pass().await;
+    assert_eq!(reason(&back), ReasonCode::Reconciled, "{:?}", back.outcome);
+    assert!(world.status.upgrade.is_none());
+}
+
+#[tokio::test]
+async fn an_untested_or_backward_tag_needs_the_approval() {
+    let mut world = s3_world(json!({}));
+    running(&mut world).await;
+    for tag in ["1.13.0", "1.12.2", "latest"] {
+        world.spec.image.tag = Some(tag.into());
+        let refused = world.pass().await;
+        assert_eq!(reason(&refused), ReasonCode::UpgradeNotAllowed, "{tag}");
+        assert_eq!(server_image(&world), IMAGE, "{tag}");
+    }
+    world
+        .annotations
+        .insert(annotations::APPROVED_UPGRADE.into(), "latest".into());
+    let approved = world.pass().await;
+    assert_eq!(
+        reason(&approved),
+        ReasonCode::UpgradeInProgress,
+        "{:?}",
+        approved.outcome
     );
 }

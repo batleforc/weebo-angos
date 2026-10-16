@@ -164,8 +164,14 @@ where
 /// failure (both jittered — the kit's).
 pub fn requeue_after(outcome: &Outcome) -> Action {
     match &outcome.ready {
-        // A reload being confirmed: its logs are read again soon.
-        Err(f) if f.reason == ReasonCode::ConfigPropagating => {
+        // A reload being confirmed (its logs), an upgrade's Job (not
+        // watched): read again soon.
+        Err(f)
+            if matches!(
+                f.reason,
+                ReasonCode::ConfigPropagating | ReasonCode::UpgradeInProgress
+            ) =>
+        {
             weebo_kit_runtime::controller::requeue_after(false, Some(15))
         }
         Err(f) => weebo_kit_runtime::controller::requeue_after(f.reason.needs_a_change(), None),

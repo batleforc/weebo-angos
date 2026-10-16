@@ -156,6 +156,8 @@ async fn apply(
         },
         &InstancePorts {
             objects: ctx.objects.as_ref(),
+            jobs: ctx.jobs.as_ref(),
+            maintenances: ctx.maintenances.as_ref(),
             logs: ctx.logs.as_ref(),
             credentials: ctx.credentials.as_ref(),
             issuer: ctx.issuer.as_ref(),

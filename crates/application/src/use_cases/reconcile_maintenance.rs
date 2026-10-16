@@ -254,6 +254,14 @@ async fn run(
             .map_err(|e| Failure::new(ReasonCode::KubernetesApiError, e))?;
         let skipped = if spec.suspend {
             Some((ReasonCode::MaintenanceSuspended, "spec.suspend".to_string()))
+        } else if let Some(up) = &instance_status.upgrade {
+            Some((
+                ReasonCode::MaintenanceSuspended,
+                format!(
+                    "{bound} upgrades Angos {} → {} ({:?})",
+                    up.from, up.to, up.step
+                ),
+            ))
         } else if !instance_ready || instance_status.pending_boot_hash.is_some() {
             Some((
                 ReasonCode::MaintenanceSuspended,
