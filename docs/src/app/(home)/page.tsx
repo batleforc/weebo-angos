@@ -22,7 +22,16 @@ kind: AngosLocalInstance
 metadata:
   name: registry
   namespace: team-a
-spec: {}`,
+spec:
+  storage:
+    s3:
+      endpoint: https://s3.example.com
+      bucket: registry
+      region: us-east-1
+      credentialsSecretRef: { name: registry-s3 }
+  auth:
+    tokenService:
+      realm: https://registry.example.com/token`,
       }}
       features={[
         {

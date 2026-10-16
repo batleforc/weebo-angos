@@ -803,6 +803,24 @@ fn put(table: &mut toml::Table, path: &[&str], value: toml::Value) {
     }
 }
 
+/// What identifies the store of a startup layer: `blob_store` and
+/// `metadata_store` without their credentials. Two layers with the same
+/// identity point at the same data (spec 2.4): a change of credentials
+/// alone rolls without confirmation.
+pub fn storage_identity(boot: &toml::Table) -> toml::Table {
+    let mut identity = toml::Table::new();
+    for key in ["blob_store", "metadata_store"] {
+        if let Some(mut store) = boot.get(key).cloned() {
+            if let Some(s3) = store.get_mut("s3").and_then(toml::Value::as_table_mut) {
+                s3.remove("access_key_id");
+                s3.remove("secret_key");
+            }
+            identity.insert(key.into(), store);
+        }
+    }
+    identity
+}
+
 /// Angos's merge of two files (`src/configuration/merge.rs:6-33`): tables
 /// merged recursively, any other value of `overlay` replacing `base`'s
 /// whole (arrays included).
@@ -1064,6 +1082,28 @@ pub(crate) mod tests {
         let (boot, hot) = layers.files();
         assert!(boot.contains("[global.job_queue]"), "{boot}");
         assert!(!hot.contains("global"), "{hot}");
+    }
+
+    #[test]
+    fn credentials_are_not_the_store() {
+        let boot = full().split().boot;
+        let mut rotated = full();
+        if let Some(Store::S3(s3)) = &mut rotated.blob_store {
+            s3.secret_key = "rotated".into();
+        }
+        assert_eq!(
+            storage_identity(&boot),
+            storage_identity(&rotated.split().boot)
+        );
+        let mut moved = full();
+        if let Some(Store::S3(s3)) = &mut moved.blob_store {
+            s3.bucket = "other".into();
+        }
+        assert_ne!(
+            storage_identity(&boot),
+            storage_identity(&moved.split().boot)
+        );
+        assert!(!render(&storage_identity(&boot)).contains("secret_key"));
     }
 
     #[test]

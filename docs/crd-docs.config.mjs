@@ -18,7 +18,17 @@ export default defineConfig({
   // generation instead of shipping a stale example.
   examples: {
     AngosLocalInstance: {
-      repositorySelector: { namespaces: { from: "Same" } },
+      storage: {
+        s3: {
+          endpoint: "https://s3.example.com",
+          bucket: "registry",
+          region: "us-east-1",
+          credentialsSecretRef: { name: "registry-s3" },
+        },
+      },
+      auth: {
+        tokenService: { realm: "https://registry.example.com/token" },
+      },
     },
   },
   // The operator reference pages (content/docs/reference/), generated from

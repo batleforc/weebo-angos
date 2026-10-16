@@ -38,3 +38,61 @@ pub fn workload_reason(e: &WorkloadError) -> ReasonCode {
         WorkloadError::SecretNotAllowed(_) => ReasonCode::SecretNotAllowed,
     }
 }
+
+/// Why a Secret the spec references couldn't be read.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum CredentialError {
+    /// The Secret or its key is missing.
+    #[error("{0}")]
+    Missing(String),
+    /// The Secret lacks `angos.weebo.io/credential: "true"`.
+    #[error("{0}")]
+    NotAllowed(String),
+    #[error("Kubernetes API error: {0}")]
+    Kubernetes(String),
+}
+
+impl CredentialError {
+    pub fn reason(&self) -> ReasonCode {
+        match self {
+            CredentialError::Missing(_) => ReasonCode::SecretMissing,
+            CredentialError::NotAllowed(_) => ReasonCode::SecretNotAllowed,
+            CredentialError::Kubernetes(_) => ReasonCode::KubernetesApiError,
+        }
+    }
+}
+
+/// The Secrets an instance's spec references, read only when they carry
+/// the credential label (spec 2.8).
+#[async_trait::async_trait]
+pub trait Credentials: Send + Sync {
+    /// The UTF-8 value of `key` of the Secret `name` of `namespace`.
+    async fn read(&self, namespace: &str, name: &str, key: &str)
+    -> Result<String, CredentialError>;
+}
+
+/// The cluster's ServiceAccount token issuer (the API server's OIDC
+/// discovery), for `auth.kubernetes` without an explicit issuer.
+#[async_trait::async_trait]
+pub trait ClusterIssuer: Send + Sync {
+    async fn issuer(&self) -> Result<String, String>;
+}
+
+/// Fresh secrets the operator generates.
+pub trait KeyGenerator: Send + Sync {
+    /// A token-service key: 32 random bytes, base64.
+    fn token_key(&self) -> String;
+}
+
+/// Where a reconcile records status fields right after the write they
+/// describe (a status merge patch): a pass that fails half-way must not
+/// forget it wrote.
+#[async_trait::async_trait]
+pub trait StatusLedger: Send + Sync {
+    async fn record(
+        &self,
+        namespace: &str,
+        name: &str,
+        fields: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<(), String>;
+}

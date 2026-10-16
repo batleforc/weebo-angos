@@ -1,36 +1,175 @@
 //! `AngosLocalInstance` (namespaced): the instance's workload and
-//! configuration (`reconcile_instance`).
+//! configuration (`reconcile_instance`). Watched besides the CR: its
+//! `Deployment` (a rollout's progress) and its pods (one that restarts
+//! during a confirmation), both by metadata. No watch of the Secrets it
+//! references: they are read again on every pass (300 s, 15 s while a
+//! reload is being confirmed).
+//!
+//! A finalizer holds its deletion; the objects it owns go with it (owner
+//! references).
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 
 use api::LocalInstance;
-use application::use_cases::reconcile_instance::reconcile_instance;
+use application::ports::{Owner, StatusLedger};
+use application::use_cases::reconcile_instance::{
+    InstancePass, InstancePorts, reconcile_instance, status_fields,
+};
+use k8s_openapi::api::apps::v1::Deployment;
+use k8s_openapi::api::core::v1::Pod;
 use kube::api::Api;
+use kube::core::PartialObjectMeta;
 use kube::runtime::controller::Action;
+use kube::runtime::finalizer::{Event as Finalizer, finalizer};
+use kube::runtime::reflector::ObjectRef;
+use kube::runtime::{WatchStreamExt, watcher};
 use kube::{Client, Resource, ResourceExt};
+use weebo_kit_runtime::events;
+use weebo_kit_runtime::status::StatusUpdate;
 
 use super::{Ctx, Error, error_policy};
 
 const KIND: &str = "AngosLocalInstance";
 
+/// The instance an object of it belongs to (`app.kubernetes.io/instance`
+/// with `managed-by: weebo-angos`).
+fn instance_of<K: Resource>(object: &K) -> Option<ObjectRef<LocalInstance>> {
+    let labels = object.meta().labels.as_ref()?;
+    (labels
+        .get("app.kubernetes.io/managed-by")
+        .map(String::as_str)
+        == Some(api::MANAGED_BY)
+        || labels.get("app.kubernetes.io/name").map(String::as_str) == Some("angos"))
+    .then_some(())?;
+    let name = labels.get("app.kubernetes.io/instance")?;
+    Some(ObjectRef::new(name).within(object.meta().namespace.as_deref()?))
+}
+
 pub async fn run(client: Client, ctx: Arc<Ctx>) {
     let health = ctx.health.clone();
+    let owned = watcher::Config::default()
+        .labels(&format!("app.kubernetes.io/managed-by={}", api::MANAGED_BY));
+    let pods = watcher::Config::default().labels("app.kubernetes.io/name=angos");
+    // Metadata only: what changed, not the objects.
+    let deployments: Api<PartialObjectMeta<Deployment>> = ctx.scope.api(client.clone());
+    let pod_api: Api<PartialObjectMeta<Pod>> = ctx.scope.api(client.clone());
     let results = super::controller(ctx.scope.api::<LocalInstance>(client), &ctx.scope)
+        .watches_stream(
+            watcher(deployments, owned)
+                .default_backoff()
+                .touched_objects(),
+            |d| instance_of(&d),
+        )
+        .watches_stream(
+            watcher(pod_api, pods).default_backoff().touched_objects(),
+            |p| instance_of(&p),
+        )
         .graceful_shutdown_on(ctx.shutdown.wait())
         .run(reconcile, error_policy, ctx);
     super::drive(KIND, health, results).await;
 }
 
-async fn reconcile(obj: Arc<LocalInstance>, ctx: Arc<Ctx>) -> Result<Action, Error> {
-    if obj.meta().deletion_timestamp.is_some() {
-        return Ok(Action::await_change());
+/// The status fields a pass writes, right after a write: the kit's
+/// `status::record`.
+struct Ledger {
+    client: Client,
+}
+
+#[async_trait::async_trait]
+impl StatusLedger for Ledger {
+    async fn record(
+        &self,
+        namespace: &str,
+        name: &str,
+        fields: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<(), String> {
+        let api: Api<LocalInstance> = Api::namespaced(self.client.clone(), namespace);
+        weebo_kit_runtime::status::record(&api, super::FIELD_MANAGER, name, &fields)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
+}
+
+async fn reconcile(obj: Arc<LocalInstance>, ctx: Arc<Ctx>) -> Result<Action, Error> {
     let namespace = obj.namespace().unwrap_or_default();
     let api: Api<LocalInstance> = Api::namespaced(ctx.client.clone(), &namespace);
+    finalizer(&api, super::FINALIZER, obj, |event| async {
+        match event {
+            Finalizer::Apply(instance) => apply(&api, &instance, &ctx).await,
+            Finalizer::Cleanup(instance) => {
+                // Its objects go with it (owner references): nothing to
+                // undo yet. Repositories and identities will hold it
+                // (InstanceInUse) once they exist.
+                super::finalize(instance.as_ref(), &ctx, async { Ok(()) }).await
+            }
+        }
+    })
+    .await
+    .map_err(|e| Error::Finalizer(Box::new(e)))
+}
+
+async fn apply(
+    api: &Api<LocalInstance>,
+    instance: &LocalInstance,
+    ctx: &Ctx,
+) -> Result<Action, Error> {
     let started = Instant::now();
-    let outcome = reconcile_instance(obj.as_ref());
-    super::record_reconcile(KIND, started, &outcome);
-    super::publish(&api, &ctx.recorder, obj.as_ref(), &outcome).await?;
-    Ok(super::requeue_after(&outcome))
+    let owner = Owner {
+        namespace: instance.namespace().unwrap_or_default(),
+        name: instance.name_any(),
+        uid: instance.uid().unwrap_or_default(),
+    };
+    let previous = instance.status.clone().unwrap_or_default();
+    let annotations: BTreeMap<String, String> = instance.annotations().clone();
+    let ledger = Ledger {
+        client: ctx.client.clone(),
+    };
+    let report = reconcile_instance(
+        InstancePass {
+            owner: &owner,
+            spec: &instance.spec,
+            annotations: &annotations,
+            status: &previous,
+            now: k8s_openapi::jiff::Timestamp::now(),
+            default_image: &ctx.settings.default_image,
+            log_limit: ctx.settings.reload_log_bytes,
+        },
+        &InstancePorts {
+            objects: ctx.objects.as_ref(),
+            logs: ctx.logs.as_ref(),
+            credentials: ctx.credentials.as_ref(),
+            issuer: ctx.issuer.as_ref(),
+            keys: ctx.keys.as_ref(),
+            ledger: &ledger,
+        },
+    )
+    .await;
+    super::record_reconcile(KIND, started, &report.outcome);
+    weebo_kit_runtime::status::publish(
+        api,
+        &ctx.recorder,
+        super::FIELD_MANAGER,
+        instance,
+        &previous.conditions,
+        StatusUpdate {
+            ready: &report.outcome.ready,
+            advisories: &report.outcome.advisories,
+            fields: status_fields(&report.status),
+        },
+    )
+    .await?;
+    for (reason, message) in &report.events {
+        events::announce_change(
+            &ctx.recorder,
+            &instance.object_ref(&()),
+            *reason,
+            events::RECONCILE,
+            message,
+        )
+        .await;
+    }
+    Ok(super::requeue_after(&report.outcome))
 }

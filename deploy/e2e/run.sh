@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # kind e2e (`task e2e`, .github/workflows/e2e.yml): deploys cert-manager and
 # the operator chart into the current kube context, then the smoke — an
-# AngosLocalInstance that must end Ready, a name the CRD refuses —, and
-# checks leader election.
+# AngosLocalInstance running a real Angos that must end Ready, a name the
+# CRD refuses —, the configuration's lifecycle on that instance (a hot
+# reload read in the pod's log, a configuration Angos refuses replaced by
+# the accepted one, a storage change held until confirmed), and checks
+# leader election.
 #
 # With a previously published chart, it first installs that release, creates
 # the smoke CRs with it, then upgrades to this checkout's chart and checks
@@ -143,6 +146,75 @@ ensure_ns team-a
 apply_smoke
 smoke_state
 
+# `jsonpath` of the instance.
+field() { kubectl -n team-a get angoslocalinstance registry -o jsonpath="$1"; }
+pod_name() {
+  kubectl -n team-a get pods -l app.kubernetes.io/instance=registry \
+    --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}'
+}
+# Waits until the hot layer desired is the one every pod confirmed.
+applied() {
+  for _ in $(seq 1 120); do
+    hash="$(field '{.status.configHash}')"
+    [ -n "$hash" ] && [ "$hash" = "$(field '{.status.appliedConfigHash}')" ] && return 0
+    sleep 2
+  done
+  fail "configuration $(field '{.status.configHash}') never confirmed: $(field '{.status.conditions}')"
+}
+
+step "a real Angos: its first configuration, its probes through the access policy"
+first_pod="$(pod_name)"
+[ -n "$first_pod" ] || fail "no Angos pod"
+[ "$(field '{.status.version}')" = 1.12.3 ] || fail "status.version: $(field '{.status.version}')"
+boot="$(field '{.status.bootHash}')"
+
+step "a hot change: reloaded in place, confirmed from the pod's log"
+kubectl -n team-a patch angoslocalinstance registry --type merge -p '{"spec":{"global":{"gcGraceSecs":900}}}'
+applied
+reason_is registry Reconciled
+[ "$(pod_name)" = "$first_pod" ] || fail "a hot change replaced the pod"
+[ "$(field '{.status.bootHash}')" = "$boot" ] || fail "a hot change rolled the startup layer"
+kubectl -n team-a get events --field-selector reason=ConfigReloaded -o name | grep -q . \
+  || fail "no ConfigReloaded event"
+
+step "a configuration Angos refuses: the accepted one goes back"
+accepted="$(kubectl -n team-a get secret registry-config-applied -o jsonpath='{.data.config\.toml}')"
+# Not rendered by a typed field, so checked by Angos only: zero is refused.
+kubectl -n team-a patch angoslocalinstance registry --type merge \
+  -p '{"spec":{"extraConfig":{"global":{"max_concurrent_cache_jobs":0}}}}'
+reason_is registry ConfigRejected
+message="$(field '{.status.rejectionMessage}')"
+printf '%s' "$message" | grep -q max_concurrent_cache_jobs || fail "rejection message: $message"
+[ "$(kubectl -n team-a get secret registry-config -o jsonpath='{.data.config\.toml}')" = "$accepted" ] \
+  || fail "the refused configuration was left in registry-config"
+# A pod that restarts now starts, on the accepted configuration.
+kubectl -n team-a delete pod "$first_pod" --wait=false
+kubectl -n team-a wait pods -l app.kubernetes.io/instance=registry --for=condition=Ready --timeout="$WAIT"
+reason_is registry ConfigRejected
+kubectl -n team-a patch angoslocalinstance registry --type json -p '[{"op":"remove","path":"/spec/extraConfig"}]'
+applied
+reason_is registry Reconciled
+
+step "a storage change waits for its confirmation"
+kubectl -n team-a patch angoslocalinstance registry --type merge -p '{"spec":{"storage":{"fs":{"rootDir":"/data2"}}}}'
+for _ in $(seq 1 60); do
+  pending="$(field '{.status.pendingBootHash}')"
+  [ -n "$pending" ] && break
+  sleep 2
+done
+[ -n "$pending" ] || fail "no pendingBootHash"
+field '{.status.conditions[?(@.type=="StorageChangePending")].message}' | grep -q '/data2' \
+  || fail "no StorageChangePending advisory"
+[ "$(field '{.status.bootHash}')" = "$boot" ] || fail "the storage moved without a confirmation"
+kubectl -n team-a annotate angoslocalinstance registry angos.weebo.io/confirm-storage="$pending" --overwrite
+for _ in $(seq 1 90); do
+  [ "$(field '{.status.bootHash}')" = "$pending" ] && break
+  sleep 2
+done
+[ "$(field '{.status.bootHash}')" = "$pending" ] || fail "the confirmed storage change never rolled"
+reason_is registry Reconciled
+[ -z "$(field '{.status.pendingBootHash}')" ] || fail "pendingBootHash left after the roll"
+
 step "the CRD refuses a name that can't name a Service"
 if kubectl apply -f - 2>/dev/null <<'YAML'
 apiVersion: angos.weebo.io/v1alpha1
@@ -150,7 +222,9 @@ kind: AngosLocalInstance
 metadata:
   name: not.a.label
   namespace: team-a
-spec: {}
+spec:
+  storage:
+    fs: {}
 YAML
 then fail "an instance named not.a.label was admitted"; fi
 

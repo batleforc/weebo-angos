@@ -5,12 +5,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use adapters_inbound::controller::Settings;
 use adapters_inbound::controller::{self, Ctx, Shutdown};
 use adapters_inbound::webhook;
-use adapters_outbound::LocalInstanceDirectory;
+use adapters_outbound::{KubeClusterIssuer, KubeCredentials, LocalInstanceDirectory, RandomKeys};
 use api::LocalInstance;
 use kube::Client;
 use kube::runtime::events::{Recorder, Reporter};
+use weebo_kit_adapters::{KubeOwnedObjects, KubePodLogs};
 use weebo_kit_runtime::store::spawn_reflector;
 use weebo_kit_runtime::{Health, WatchScope, leader, telemetry, webhook_server};
 
@@ -87,9 +89,24 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     );
 
     let holder_id = std::env::var("HOSTNAME").unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+    let settings = settings_from_env()?;
+    let allowed_images = weebo_kit_application::pod_safety::parse_allowed_images(
+        std::env::var("WEEBO_ANGOS_ALLOWED_IMAGES").ok().as_deref(),
+        &[api::angos::IMAGE_REPOSITORY],
+    );
+    tracing::info!(?allowed_images, default_image = %settings.default_image, "instances");
     let ctx = Arc::new(Ctx {
         client: client.clone(),
         instances,
+        objects: Arc::new(KubeOwnedObjects::new(
+            client.clone(),
+            adapters_outbound::workload_settings(allowed_images),
+        )),
+        logs: Arc::new(KubePodLogs::new(client.clone())),
+        credentials: Arc::new(KubeCredentials::new(client.clone())),
+        issuer: Arc::new(KubeClusterIssuer::new(client.clone())),
+        keys: Arc::new(RandomKeys),
+        settings,
         recorder: Recorder::new(
             client.clone(),
             Reporter {
@@ -133,4 +150,28 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     // Bounded: the drain started with the signal, long before.
     let _ = tokio::time::timeout(Duration::from_secs(30), server.stopped()).await;
     Ok(())
+}
+
+/// The operator's settings (spec 6.11): `WEEBO_ANGOS_DEFAULT_IMAGE` (empty:
+/// the version targeted) and `WEEBO_ANGOS_RELOAD_LOG_BYTES`. A value that
+/// doesn't read stops the start.
+fn settings_from_env() -> anyhow::Result<Settings> {
+    let mut settings = Settings::default();
+    if let Some(image) = std::env::var("WEEBO_ANGOS_DEFAULT_IMAGE")
+        .ok()
+        .filter(|i| !i.trim().is_empty())
+    {
+        settings.default_image = image.trim().to_string();
+    }
+    if let Ok(bytes) = std::env::var("WEEBO_ANGOS_RELOAD_LOG_BYTES") {
+        settings.reload_log_bytes = bytes
+            .trim()
+            .parse()
+            .ok()
+            .filter(|b: &i64| *b >= 1024)
+            .ok_or_else(|| {
+                anyhow::anyhow!("WEEBO_ANGOS_RELOAD_LOG_BYTES={bytes:?}: an integer >= 1024")
+            })?;
+    }
+    Ok(settings)
 }

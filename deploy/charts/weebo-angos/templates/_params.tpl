@@ -51,7 +51,7 @@ env:
     value: {{ . | quote }}
   {{- end }}
   - name: WEEBO_ANGOS_RELOAD_LOG_BYTES
-    value: {{ .Values.defaults.reloadLogBytes | quote }}
+    value: {{ .Values.defaults.reloadLogBytes | int64 | toString | quote }}
 # The operator never calls Angos (no administration API): files, objects,
 # pod logs and pod status only, all through the API server.
 egress: []

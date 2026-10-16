@@ -26,16 +26,53 @@ metadata:
   name: my-localinstance
   namespace: team-a
 spec:
-  repositorySelector:
-    namespaces:
-      from: Same
+  storage:
+    s3:
+      endpoint: https://s3.example.com
+      bucket: registry
+      region: us-east-1
+      credentialsSecretRef:
+        name: registry-s3
+  auth:
+    tokenService:
+      realm: https://registry.example.com/token
 ```
 
 ## Spec fields
 
 | Field | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `repositorySelector` | `object` | no |  | Which `AngosRepository`s the instance serves, and from which namespaces. |
+| `affinity` | `object` | no |  |  |
+| `auth` | `object` | no | `{}` | `[auth]`: who may authenticate. |
+| `cache` | `object` | no |  | `[cache]`: unset, Angos caches in memory. |
+| `env` | `object[]` | no |  | Rarely needed (Angos reads no secret from its environment). Secrets read here must be labelled `angos.weebo.io/credential: "true"`; `RUST_LOG` is the operator's (`logLevel`). |
+| `envFrom` | `object[]` | no |  |  |
+| `extraConfig` | `object` | no |  | Keys of Angos's configuration no typed field renders, merged last into the hot file. Checked by Angos only (advisory `ExtraConfigUsed`). |
+| `extraVolumeMounts` | `object[]` | no |  |  |
+| `extraVolumes` | `object[]` | no |  | CA bundles and other files: no `hostPath`; Secrets labelled `angos.weebo.io/credential: "true"`. |
+| `global` | `object` | no | `{}` | `[global]`: what applies to every repository. |
+| `image` | `object` | no |  | The Angos image. Its repository must be one the operator allows (`managedInstances.allowedImages`). |
+| `imagePullSecrets` | `object[]` | no |  |  |
+| `logLevel` | `string` | no | `"info"` | `RUST_LOG` of the pods (e.g. `info`, `warn,angos=debug`); the operator always adds `angos::configuration::watcher=info`, the reload messages it reads. |
+| `networkPolicy` | `object` | no |  | A `NetworkPolicy` around the pods: unset, none. |
+| `nodeSelector` | `object` | no |  |  |
+| `podAnnotations` | `object` | no |  |  |
+| `podLabels` | `object` | no |  |  |
+| `podSecurityContext` | `object` | no |  | Unset: non-root 65534 (the image's user), seccomp `RuntimeDefault`. |
+| `priorityClassName` | `string` | no |  |  |
+| `reload` | `object` | no | `{"mode":"Hot","onUnconfirmed":"Wait","timeoutSeconds":180}` | How a new configuration reaches the pods. |
+| `replicas` | `integer` | no | `1` | One replica until the worker and the shared-store checks land. |
+| `repositorySelector` | `object` | no |  | Which `AngosRepository`s (and `AngosIdentity`s) the instance serves, and from which namespaces. |
+| `resources` | `object` | no |  | Unset: requests 100m CPU / 256Mi, limit 1Gi. |
+| `securityContext` | `object` | no |  | Unset: read-only root filesystem, no capability, no escalation. |
+| `server` | `object` | no | `{"port":8000}` | `[server]`: the listener. |
+| `service` | `object` | no | `{"port":8000,"type":"ClusterIP"}` |  |
+| `serviceAccount` | `object` | no | `{"create":true}` |  |
+| `storage` | `object` | yes |  | Where Angos keeps blobs and metadata. Read at startup only: a change of the store waits for the annotation `angos.weebo.io/confirm-storage` (set to `status.pendingBootHash`), then rolls the pods. Pointing an instance at another, empty store makes it serve an empty registry: no data moves. |
+| `terminationGracePeriodSeconds` | `integer` | no |  | Unset: three times `global.shutdownDrainSecs` (30) plus 10. |
+| `tolerations` | `object[]` | no |  |  |
+| `tracing` | `object` | no |  | `[observability.tracing]`: OTLP traces. Startup only. |
+| `ui` | `object` | no |  | `[ui]`: Angos's web UI. |
 
 ## Build a manifest
 

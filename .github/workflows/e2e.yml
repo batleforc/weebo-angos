@@ -60,6 +60,12 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-mise
       - run: mise install
+      # Angos watches its configuration with inotify: a node short of
+      # instances leaves its watcher dead (kind's known requirement).
+      - name: inotify limits for kind
+        run: |
+          sudo sysctl fs.inotify.max_user_instances=512
+          sudo sysctl fs.inotify.max_user_watches=524288
       - name: kind e2e
         env:
           CONTAINERFILE: ${{ matrix.file }}
