@@ -855,3 +855,142 @@ async fn an_identity_s_version_is_confirmed_only_once_the_pods_reload() {
         Some(2)
     );
 }
+
+fn s3_world(extra: serde_json::Value) -> World {
+    let mut spec = json!({"storage": {"s3": {
+        "endpoint": "http://s3", "bucket": "b", "region": "us-east-1",
+        "credentialsSecretRef": {"name": "s3"},
+    }}});
+    for (key, value) in extra.as_object().unwrap() {
+        spec[key] = value.clone();
+    }
+    let world = World::new(spec);
+    world.credentials.insert(
+        "team",
+        "s3",
+        &[("access-key-id", "AK"), ("secret-key", "SK")],
+    );
+    world
+}
+
+async fn template_of(world: &World, deployment: &str) -> Option<String> {
+    world
+        .objects
+        .rollout(&world.owner, deployment)
+        .await
+        .unwrap()
+        .and_then(|r| r.annotation(annotations::BOOT_HASH).map(String::from))
+}
+
+#[tokio::test]
+async fn the_worker_is_ready_before_the_server_hands_it_the_jobs() {
+    let mut world = s3_world(json!({}));
+    running(&mut world).await;
+    let before = world.template_boot_hash().await;
+    world.spec.worker = Some(api::local_instance::Worker::default());
+    // The worker first, on the new startup layer; the server keeps its own.
+    let first = world.pass().await;
+    assert_eq!(reason(&first), ReasonCode::WorkloadNotReady);
+    assert!(
+        format!("{:?}", first.outcome).contains("the worker starts before"),
+        "{:?}",
+        first.outcome
+    );
+    assert_eq!(world.template_boot_hash().await, before);
+    let after = template_of(&world, "reg-worker").await.unwrap();
+    assert_ne!(after, before);
+    assert!(
+        world
+            .objects
+            .secret(&boot_secret("reg", &after), paths::FILE)
+            .unwrap()
+            .contains("[global.job_queue]")
+    );
+    // Its rollout done, the server follows.
+    let second = world.pass().await;
+    assert_eq!(
+        reason(&second),
+        ReasonCode::Reconciled,
+        "{:?}",
+        second.outcome
+    );
+    assert_eq!(world.template_boot_hash().await, after);
+    assert_eq!(second.status.available_workers, Some(1));
+
+    // Turned off: the server rolls first, the worker goes after.
+    world.spec.worker = None;
+    let off = world.pass().await;
+    assert_eq!(reason(&off), ReasonCode::Reconciled, "{:?}", off.outcome);
+    assert!(world.objects.object("Deployment", "reg-worker").is_some());
+    world.pass().await;
+    assert!(world.objects.object("Deployment", "reg-worker").is_none());
+}
+
+#[tokio::test]
+async fn replicas_wait_for_angos_s_probe_of_the_store() {
+    let mut world = s3_world(json!({"replicas": 3, "worker": {}}));
+    let first = running(&mut world).await;
+    assert!(advisories(&first).contains(&ReasonCode::ReplicasHeld));
+    let replicas = |world: &World| {
+        world.objects.object("Deployment", "reg").unwrap().manifest["spec"]["replicas"].clone()
+    };
+    assert_eq!(replicas(&world), 1);
+    assert!(world.objects.object("PodDisruptionBudget", "reg").is_none());
+    // A ready server whose startup log has no advisory warning: atomic.
+    world.pod("reg-1", "2026-10-16T09:00:00Z");
+    let probed = world.pass().await;
+    assert_eq!(reason(&probed), ReasonCode::WorkloadNotReady);
+    let writes = probed.status.conditional_writes.clone().unwrap();
+    assert!(writes.atomic);
+    assert_eq!(writes.store, "s3 http://s3/b");
+    let scaled = world.pass().await;
+    assert_eq!(
+        reason(&scaled),
+        ReasonCode::Reconciled,
+        "{:?}",
+        scaled.outcome
+    );
+    assert!(!advisories(&scaled).contains(&ReasonCode::ReplicasHeld));
+    assert_eq!(replicas(&world), 3);
+    assert!(world.objects.object("PodDisruptionBudget", "reg").is_some());
+}
+
+#[tokio::test]
+async fn advisory_claims_hold_the_replicas_unless_allowed() {
+    let mut world = s3_world(json!({"replicas": 2, "worker": {}}));
+    running(&mut world).await;
+    world.pod("reg-1", "2026-10-16T09:00:00Z");
+    world.log(
+        "reg-1",
+        "2026-10-16T09:00:01Z".parse().unwrap(),
+        "WARN",
+        reload::JOB_STORE_TARGET,
+        "job queue: the metadata store's backend did not enforce atomic create-if-absent; \
+         falling back to advisory claims: …",
+    );
+    let probed = world.pass().await;
+    assert_eq!(
+        reason(&probed),
+        ReasonCode::Reconciled,
+        "{:?}",
+        probed.outcome
+    );
+    assert!(!probed.status.conditional_writes.clone().unwrap().atomic);
+    let held = world.pass().await;
+    let message = &held
+        .outcome
+        .advisories
+        .iter()
+        .find(|a| a.reason == ReasonCode::ReplicasHeld)
+        .unwrap()
+        .message;
+    assert!(message.contains("allow-advisory-claims"), "{message}");
+    world
+        .annotations
+        .insert(annotations::ALLOW_ADVISORY_CLAIMS.into(), "true".into());
+    world.pass().await;
+    assert_eq!(
+        world.objects.object("Deployment", "reg").unwrap().manifest["spec"]["replicas"],
+        2
+    );
+}

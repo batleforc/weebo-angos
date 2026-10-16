@@ -11,7 +11,9 @@
 //!    changes or 10 minutes passed — the last one every pod accepted (D12);
 //!    a new content written is recorded at once (`configWrittenTime`);
 //! 5. the objects are applied (none taken over), stale startup `Secret`s
-//!    removed;
+//!    removed — the worker before the server when the durable queue is
+//!    turned on, after it when turned off; one server pod until Angos found
+//!    the store's conditional writes atomic (spec 6.3);
 //! 6. the rollout: pods not ready on the startup layer are
 //!    `WorkloadNotReady`, crashing ones `BootRejected` (their last error);
 //! 7. the hot layer's confirmation, pod by pod, from their logs: applied
@@ -37,7 +39,7 @@ use crate::ports::{
 };
 use crate::reload::{self, Confirmation, LOG_SLACK};
 use crate::render::{self, Rendered, Resolved, paths};
-use crate::workload::{self, WorkloadInput, boot_secret, selector};
+use crate::workload::{self, Role, WorkloadInput, boot_secret, role_selector, selector};
 
 /// A refused hot layer is tried again after this long even if nothing
 /// changed (a JWKS unreachable for a while…).
@@ -114,6 +116,7 @@ pub fn status_fields(status: &InstanceStatus) -> serde_json::Map<String, serde_j
         "endpoint",
         "version",
         "availableReplicas",
+        "availableWorkers",
         "bootHash",
         "pendingBootHash",
         "configHash",
@@ -619,6 +622,102 @@ async fn prune_boot_secrets(
     Ok(())
 }
 
+/// Whether a startup file turns the durable queue on.
+fn has_job_queue(file: &str) -> bool {
+    toml::from_str::<toml::Table>(file)
+        .is_ok_and(|t| t.get("global").and_then(|g| g.get("job_queue")).is_some())
+}
+
+/// The store the job queue's claims live in (the metadata store, or the
+/// blob store), in words: what Angos's probe is about.
+fn claims_store(file: &str) -> Option<String> {
+    let table = toml::from_str::<toml::Table>(file).ok()?;
+    let identity = domain::config::storage_identity(&table);
+    let store = identity
+        .get("metadata_store")
+        .or_else(|| identity.get("blob_store"))?;
+    let mut single = toml::Table::new();
+    single.insert("blob_store".into(), store.clone());
+    Some(describe_store(&toml::to_string(&single).ok()?))
+}
+
+/// The server's pods: `spec.replicas`, or one while the store's
+/// conditional writes aren't known atomic.
+fn server_replicas(
+    pass: &InstancePass<'_>,
+    status: &InstanceStatus,
+    store: Option<&str>,
+    advisories: &mut Vec<Advisory>,
+) -> i32 {
+    let wanted = pass.spec.replicas;
+    if wanted <= 1 {
+        return wanted;
+    }
+    let forced = pass
+        .annotations
+        .get(annotations::ALLOW_ADVISORY_CLAIMS)
+        .is_some_and(|v| v == "true");
+    let probed = status
+        .conditional_writes
+        .as_ref()
+        .filter(|c| Some(c.store.as_str()) == store);
+    match probed {
+        Some(c) if c.atomic || forced => wanted,
+        Some(c) => {
+            advisories.push(advisory(
+                ReasonCode::ReplicasHeld,
+                format!(
+                    "Angos found the conditional writes of {} not atomic (pod {}): with several \
+                     server pods, job claims and immutable tags would race; one runs. To run \
+                     {wanted} anyway: kubectl annotate angoslocalinstance {} {}=true",
+                    c.store,
+                    c.pod,
+                    pass.owner.name,
+                    annotations::ALLOW_ADVISORY_CLAIMS
+                ),
+            ));
+            1
+        }
+        None => {
+            advisories.push(advisory(
+                ReasonCode::ReplicasHeld,
+                format!(
+                    "one server pod runs until Angos probed the store's conditional writes (when \
+                     its durable queue starts); then {wanted}"
+                ),
+            ));
+            1
+        }
+    }
+}
+
+/// Rolls the pods of the server and, when it runs, of the worker.
+async fn restart(
+    ports: &InstancePorts<'_>,
+    owner: &Owner,
+    worker: bool,
+    value: String,
+) -> Result<(), Failure> {
+    let names = Names(&owner.name);
+    let mut deployments = vec![names.workload()];
+    if worker {
+        deployments.push(names.worker());
+    }
+    for deployment in deployments {
+        ports
+            .objects
+            .annotate_template(
+                owner,
+                &deployment,
+                &BTreeMap::from([(annotations::RESTARTED_AT.to_string(), value.clone())]),
+                false,
+            )
+            .await
+            .map_err(workload_failure)?;
+    }
+    Ok(())
+}
+
 /// The pass.
 pub async fn reconcile_instance(
     pass: InstancePass<'_>,
@@ -765,6 +864,47 @@ async fn run(
             image = running_image;
         }
     }
+    // The worker: ready before the server hands it the jobs, removed
+    // after the server took them back (spec 6.3).
+    let worker = spec.worker.as_ref().filter(|w| w.enabled);
+    let running_server = running.as_ref().and_then(|r| {
+        Some((
+            r.annotation(annotations::BOOT_HASH)?.to_string(),
+            r.annotation(workload::IMAGE_ANNOTATION)?.to_string(),
+        ))
+    });
+    let running_queue = match &running_server {
+        Some((hash, _)) if *hash == boot.hash => Some(has_job_queue(&boot.file)),
+        Some((hash, _)) => ports
+            .objects
+            .secret_text(owner, &boot_secret(&owner.name, hash), paths::FILE)
+            .await
+            .map_err(workload_failure)?
+            .map(|file| has_job_queue(&file)),
+        None => None,
+    };
+    let worker_rolled = |rollout: &Option<weebo_kit_application::workload::Rollout>| {
+        rollout.as_ref().is_some_and(|r| {
+            r.complete()
+                && r.annotation(annotations::BOOT_HASH) == Some(boot.hash.as_str())
+                && r.annotation(workload::IMAGE_ANNOTATION) == Some(image.as_str())
+        })
+    };
+    let mut server_hold = None;
+    if worker.is_some() && running_queue == Some(false) {
+        let rollout = ports
+            .objects
+            .rollout(owner, &names.worker())
+            .await
+            .map_err(workload_failure)?;
+        if !worker_rolled(&rollout) {
+            server_hold = running_server
+                .as_ref()
+                .map(|(hash, image)| (hash.as_str(), image.as_str()));
+        }
+    }
+    let store = claims_store(&boot.file);
+    let replicas = server_replicas(pass, status, store.as_deref(), advisories);
     let input = WorkloadInput {
         name: &owner.name,
         namespace: &owner.namespace,
@@ -774,6 +914,10 @@ async fn run(
         boot_hash: &boot.hash,
         hot_file: &target,
         rollout_hash: (spec.reload.mode == ReloadMode::Rollout).then_some(target_hash.as_str()),
+        server_hold,
+        replicas,
+        worker,
+        remove_worker: running_queue != Some(true),
     };
     ports
         .objects
@@ -813,6 +957,15 @@ async fn run(
         .rollout(owner, &names.workload())
         .await
         .map_err(workload_failure)?;
+    let worker_rollout = match worker {
+        Some(_) => ports
+            .objects
+            .rollout(owner, &names.worker())
+            .await
+            .map_err(workload_failure)?,
+        None => None,
+    };
+    status.available_workers = worker_rollout.as_ref().map(|r| r.available);
     let pods = ports
         .objects
         .pods(owner, &selector(&owner.name))
@@ -827,7 +980,7 @@ async fn run(
         r.complete()
             && r.annotation(annotations::BOOT_HASH) == Some(boot.hash.as_str())
             && r.annotation(workload::IMAGE_ANNOTATION) == Some(image.as_str())
-    });
+    }) && (worker.is_none() || worker_rolled(&worker_rollout));
     if !rolled {
         if let Some(crashing) = on_boot.iter().find(|p| {
             p.restarts > 0
@@ -863,12 +1016,17 @@ async fn run(
             ));
         }
         let ready = on_boot.iter().filter(|p| p.ready).count();
+        let expected = replicas + worker.map_or(0, |w| w.replicas);
         return Err(Failure::new(
             ReasonCode::WorkloadNotReady,
             format!(
-                "{ready}/{} pods ready on the startup layer {} ({image})",
-                spec.replicas,
-                &boot.hash[..8]
+                "{ready}/{expected} pods ready on the startup layer {} ({image}){}",
+                &boot.hash[..8],
+                if server_hold.is_some() {
+                    ": the worker starts before the server hands it the jobs"
+                } else {
+                    ""
+                }
             ),
         ));
     }
@@ -885,6 +1043,53 @@ async fn run(
     }
     status.boot_hash = Some(boot.hash.clone());
     status.version = Some(workload::tag(&image).to_string());
+
+    // Angos's own probe of the store, read once per store in the startup
+    // log of a ready server running the durable queue.
+    if worker.is_some()
+        && let Some(store) = store
+        && status.conditional_writes.as_ref().map(|c| &c.store) != Some(&store)
+    {
+        let servers = ports
+            .objects
+            .pods(owner, &role_selector(&owner.name, Role::Server))
+            .await
+            .map_err(workload_failure)?;
+        if let Some(pod) = servers
+            .iter()
+            .find(|p| p.ready && p.annotations.get(annotations::BOOT_HASH) == Some(&boot.hash))
+            && let Ok(lines) = ports
+                .logs
+                .read(
+                    &owner.namespace,
+                    &pod.name,
+                    &LogQuery {
+                        container: Some("angos".into()),
+                        since: None,
+                        limit_bytes: Some(reload::STARTUP_LOG_BYTES),
+                    },
+                )
+                .await
+        {
+            let atomic = !reload::advisory_claims(&lines);
+            status.conditional_writes = Some(api::status::ConditionalWrites {
+                store,
+                atomic,
+                pod: pod.name.clone(),
+                observed_time: pass.now.to_string(),
+            });
+            if spec.replicas > replicas && atomic {
+                return Err(Failure::new(
+                    ReasonCode::WorkloadNotReady,
+                    format!(
+                        "Angos found the store's conditional writes atomic: scaling to {} server \
+                         pods",
+                        spec.replicas
+                    ),
+                ));
+            }
+        }
+    }
 
     // 7. The hot layer's confirmation.
     if status.applied_config_hash.is_none() {
@@ -977,19 +1182,13 @@ async fn run(
                 if why == reload::CRASHED {
                     // Its watcher is dead: restarted, the pods read the
                     // accepted layer back.
-                    ports
-                        .objects
-                        .annotate_template(
-                            owner,
-                            &names.workload(),
-                            &BTreeMap::from([(
-                                annotations::RESTARTED_AT.to_string(),
-                                format!("crashed-{}", &target_hash[..8]),
-                            )]),
-                            false,
-                        )
-                        .await
-                        .map_err(workload_failure)?;
+                    restart(
+                        ports,
+                        owner,
+                        worker.is_some(),
+                        format!("crashed-{}", &target_hash[..8]),
+                    )
+                    .await?;
                 }
                 status.pods.clear();
                 return Err(Failure::new(
@@ -1007,19 +1206,7 @@ async fn run(
                     || !dead_watchers.is_empty()
                     || (overdue && spec.reload.on_unconfirmed == OnUnconfirmed::Rollout);
                 if roll && status.rolled_out_for.as_deref() != Some(target_hash.as_str()) {
-                    ports
-                        .objects
-                        .annotate_template(
-                            owner,
-                            &names.workload(),
-                            &BTreeMap::from([(
-                                annotations::RESTARTED_AT.to_string(),
-                                target_hash.clone(),
-                            )]),
-                            false,
-                        )
-                        .await
-                        .map_err(workload_failure)?;
+                    restart(ports, owner, worker.is_some(), target_hash.clone()).await?;
                     status.rolled_out_for = Some(target_hash.clone());
                 }
                 if !dead_watchers.is_empty() {

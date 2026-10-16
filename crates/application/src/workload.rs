@@ -7,12 +7,15 @@
 //!   pods;
 //! - `<name>-config`: the hot layer, rewritten in place, reloaded by Angos;
 //! - the `Deployment` (`angos -c <boot> -c <hot> server`), its
-//!   `ServiceAccount`, `Service`, claims and `NetworkPolicy`.
+//!   `ServiceAccount`, `Service`, claims, `NetworkPolicy` and — from two
+//!   pods — `PodDisruptionBudget`;
+//! - with `worker.enabled`, `<name>-worker` (`angos … worker`): the same
+//!   files and mounts, no port nor probe (spec 6.3).
 
 use std::collections::BTreeMap;
 
 use api::config::{AccessMode, FsStorage};
-use api::local_instance::{LocalInstanceSpec, Names};
+use api::local_instance::{LocalInstanceSpec, Names, Worker};
 use k8s_openapi::ByteString;
 use k8s_openapi::api::apps::v1::{
     Deployment, DeploymentSpec, DeploymentStrategy, RollingUpdateDeployment,
@@ -20,11 +23,12 @@ use k8s_openapi::api::apps::v1::{
 use k8s_openapi::api::core::v1::{
     ConfigMapProjection, Container, ContainerPort, EmptyDirVolumeSource, EnvVar, HTTPGetAction,
     KeyToPath, Lifecycle, LifecycleHandler, PersistentVolumeClaim, PersistentVolumeClaimSpec,
-    PersistentVolumeClaimVolumeSource, PodSpec, PodTemplateSpec, Probe, ProjectedVolumeSource,
-    ResourceRequirements, Secret, SecretVolumeSource, Service, ServiceAccount,
-    ServiceAccountTokenProjection, ServicePort, ServiceSpec, SleepAction, Volume, VolumeMount,
-    VolumeProjection, VolumeResourceRequirements,
+    PersistentVolumeClaimVolumeSource, PodAffinity, PodAffinityTerm, PodSpec, PodTemplateSpec,
+    Probe, ProjectedVolumeSource, ResourceRequirements, Secret, SecretVolumeSource, Service,
+    ServiceAccount, ServiceAccountTokenProjection, ServicePort, ServiceSpec, SleepAction, Volume,
+    VolumeMount, VolumeProjection, VolumeResourceRequirements,
 };
+use k8s_openapi::api::policy::v1::{PodDisruptionBudget, PodDisruptionBudgetSpec};
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{LabelSelector, ObjectMeta};
 use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
@@ -60,6 +64,24 @@ pub struct WorkloadInput<'a> {
     pub hot_file: &'a str,
     /// Set in `reload.mode: Rollout`: the hot layer's hash on the template.
     pub rollout_hash: Option<&'a str>,
+    /// The server's startup layer and image when they wait for the
+    /// worker's (spec 6.3); unset, `boot_hash` and `image`.
+    pub server_hold: Option<(&'a str, &'a str)>,
+    /// The server's pods: `spec.replicas`, or one until the store's
+    /// conditional writes are known atomic.
+    pub replicas: i32,
+    /// The worker to run (`worker.enabled`).
+    pub worker: Option<&'a Worker>,
+    /// The worker is removed (disabled, and the server took the jobs
+    /// back); otherwise a disabled worker is left as it is.
+    pub remove_worker: bool,
+}
+
+impl WorkloadInput<'_> {
+    /// The server's startup layer hash and image.
+    pub fn server_boot(&self) -> (&str, &str) {
+        self.server_hold.unwrap_or((self.boot_hash, self.image))
+    }
 }
 
 /// The labels of everything an instance owns.
@@ -75,12 +97,39 @@ pub fn labels(name: &str, component: &str) -> BTreeMap<String, String> {
     ])
 }
 
-/// The labels selecting the instance's pods.
+/// The labels selecting the instance's pods, server and worker: those
+/// that load the configuration. The server's `Deployment` selects with
+/// them too (a selector is immutable; the ReplicaSets' owner references
+/// keep the two Deployments apart).
 pub fn selector(name: &str) -> BTreeMap<String, String> {
     BTreeMap::from([
         ("app.kubernetes.io/name".into(), "angos".into()),
         ("app.kubernetes.io/instance".into(), name.into()),
     ])
+}
+
+/// The labels of one role's pods: what the `Service`, the
+/// `PodDisruptionBudget` and the worker's `Deployment` select.
+pub fn role_selector(name: &str, role: Role) -> BTreeMap<String, String> {
+    let mut labels = selector(name);
+    labels.insert("app.kubernetes.io/component".into(), role.as_str().into());
+    labels
+}
+
+/// The instance's two kinds of pods.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    Server,
+    Worker,
+}
+
+impl Role {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Role::Server => "server",
+            Role::Worker => "worker",
+        }
+    }
 }
 
 /// The name of the startup `Secret` of `boot_hash`.
@@ -194,7 +243,12 @@ pub fn single_writer(spec: &LocalInstanceSpec) -> bool {
 }
 
 fn rust_log(spec: &LocalInstanceSpec) -> String {
-    format!("{},{}=info", spec.log_level, crate::reload::WATCHER_TARGET)
+    format!(
+        "{},{}=info,{}=warn",
+        spec.log_level,
+        crate::reload::WATCHER_TARGET,
+        crate::reload::JOB_STORE_TARGET
+    )
 }
 
 fn service_account_name(input: &WorkloadInput<'_>) -> String {
@@ -206,15 +260,20 @@ fn service_account_name(input: &WorkloadInput<'_>) -> String {
         .unwrap_or_else(|| input.name.to_string())
 }
 
-fn deployment(input: &WorkloadInput<'_>) -> Deployment {
+fn deployment(input: &WorkloadInput<'_>, role: Role) -> Deployment {
     let spec = input.spec;
     let names = Names(input.name);
     let tls = spec.server.tls.is_some();
+    let (boot_hash, image) = match role {
+        Role::Server => input.server_boot(),
+        Role::Worker => (input.boot_hash, input.image),
+    };
+    let worker = input.worker.filter(|_| role == Role::Worker);
     let mut volumes = vec![
         Volume {
             name: "boot".into(),
             secret: Some(SecretVolumeSource {
-                secret_name: Some(boot_secret(input.name, input.boot_hash)),
+                secret_name: Some(boot_secret(input.name, boot_hash)),
                 ..Default::default()
             }),
             ..Default::default()
@@ -338,18 +397,18 @@ fn deployment(input: &WorkloadInput<'_>) -> Deployment {
     env.extend(spec.env.iter().filter(|e| e.name != "RUST_LOG").cloned());
 
     let mut annotations = spec.pod_annotations.clone();
-    annotations.insert(api::annotations::BOOT_HASH.into(), input.boot_hash.into());
-    annotations.insert(IMAGE_ANNOTATION.into(), input.image.into());
+    annotations.insert(api::annotations::BOOT_HASH.into(), boot_hash.into());
+    annotations.insert(IMAGE_ANNOTATION.into(), image.into());
     if let Some(hash) = input.rollout_hash {
         annotations.insert(CONFIG_HASH_ANNOTATION.into(), hash.into());
     }
     let mut pod_labels = selector(input.name);
     pod_labels.extend(spec.pod_labels.clone());
-    pod_labels.insert("app.kubernetes.io/component".into(), "server".into());
+    pod_labels.insert("app.kubernetes.io/component".into(), role.as_str().into());
 
     let drain = spec.global.shutdown_drain_secs.unwrap_or(30) as i64;
     let scheme = if tls { "HTTPS" } else { "HTTP" };
-    let strategy = if single_writer(spec) {
+    let strategy = if single_writer(spec) && role == Role::Server {
         DeploymentStrategy {
             type_: Some("Recreate".into()),
             ..Default::default()
@@ -363,12 +422,103 @@ fn deployment(input: &WorkloadInput<'_>) -> Deployment {
             }),
         }
     };
+    let mut args = vec![
+        "-c".into(),
+        format!("{}/{}", paths::BOOT_DIR, paths::FILE),
+        "-c".into(),
+        format!("{}/{}", paths::HOT_DIR, paths::FILE),
+        role.as_str().into(),
+    ];
+    let mut container = Container {
+        name: "angos".into(),
+        image: Some(image.into()),
+        image_pull_policy: Some(spec.image.pull_policy.unwrap_or_default().as_str().into()),
+        env: Some(env),
+        env_from: (!spec.env_from.is_empty()).then(|| spec.env_from.clone()),
+        resources: Some(spec.resources.clone().unwrap_or_else(default_resources)),
+        security_context: Some(
+            spec.security_context
+                .clone()
+                .unwrap_or_else(restricted_container_security),
+        ),
+        volume_mounts: Some(mounts),
+        ..Default::default()
+    };
+    let (name, replicas, selector, affinity) = match worker {
+        None => {
+            container.ports = Some(vec![ContainerPort {
+                name: Some("http".into()),
+                container_port: spec.server.port.into(),
+                protocol: Some("TCP".into()),
+                ..Default::default()
+            }]);
+            // A slow first S3 listing: up to 5 minutes to start.
+            container.startup_probe = Some(probe("/readyz", scheme, 5, 60));
+            container.readiness_probe = Some(probe("/readyz", scheme, 10, 3));
+            container.liveness_probe = Some(probe("/healthz", scheme, 10, 6));
+            // The image has no shell: the kubelet sleeps, the endpoints
+            // drain.
+            container.lifecycle = Some(Lifecycle {
+                pre_stop: Some(LifecycleHandler {
+                    sleep: Some(SleepAction { seconds: 5 }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+            (
+                names.workload(),
+                input.replicas,
+                selector(input.name),
+                spec.affinity.clone(),
+            )
+        }
+        Some(worker) => {
+            // No port: the process exiting is its only health signal.
+            for queue in &worker.queues {
+                args.extend(["--queue".to_string(), queue.as_str().to_string()]);
+            }
+            if let Some(secs) = worker.poll_interval_seconds {
+                args.extend(["--poll-interval".to_string(), format!("{secs}s")]);
+            }
+            if let Some(resources) = &worker.resources {
+                container.resources = Some(resources.clone());
+            }
+            // A single-writer claim is mounted by one node: the worker goes
+            // where the server runs.
+            let affinity = if single_writer(spec) {
+                let mut affinity = spec.affinity.clone().unwrap_or_default();
+                affinity
+                    .pod_affinity
+                    .get_or_insert_with(PodAffinity::default)
+                    .required_during_scheduling_ignored_during_execution
+                    .get_or_insert_default()
+                    .push(PodAffinityTerm {
+                        label_selector: Some(LabelSelector {
+                            match_labels: Some(role_selector(input.name, Role::Server)),
+                            ..Default::default()
+                        }),
+                        topology_key: "kubernetes.io/hostname".into(),
+                        ..Default::default()
+                    });
+                Some(affinity)
+            } else {
+                spec.affinity.clone()
+            };
+            (
+                names.worker(),
+                worker.replicas,
+                role_selector(input.name, Role::Worker),
+                affinity,
+            )
+        }
+    };
+    container.args = Some(args);
     Deployment {
-        metadata: meta(input, names.workload(), "server"),
+        metadata: meta(input, name, role.as_str()),
         spec: Some(DeploymentSpec {
-            replicas: Some(spec.replicas),
+            replicas: Some(replicas),
             selector: LabelSelector {
-                match_labels: Some(selector(input.name)),
+                match_labels: Some(selector),
                 ..Default::default()
             },
             strategy: Some(strategy),
@@ -391,56 +541,14 @@ fn deployment(input: &WorkloadInput<'_>) -> Deployment {
                     ),
                     node_selector: some_map(&spec.node_selector),
                     tolerations: (!spec.tolerations.is_empty()).then(|| spec.tolerations.clone()),
-                    affinity: spec.affinity.clone(),
+                    affinity,
                     priority_class_name: spec.priority_class_name.clone(),
                     termination_grace_period_seconds: Some(
                         spec.termination_grace_period_seconds
                             .unwrap_or(3 * drain + 10),
                     ),
                     volumes: Some(volumes),
-                    containers: vec![Container {
-                        name: "angos".into(),
-                        image: Some(input.image.into()),
-                        image_pull_policy: Some(
-                            spec.image.pull_policy.unwrap_or_default().as_str().into(),
-                        ),
-                        args: Some(vec![
-                            "-c".into(),
-                            format!("{}/{}", paths::BOOT_DIR, paths::FILE),
-                            "-c".into(),
-                            format!("{}/{}", paths::HOT_DIR, paths::FILE),
-                            "server".into(),
-                        ]),
-                        env: Some(env),
-                        env_from: (!spec.env_from.is_empty()).then(|| spec.env_from.clone()),
-                        ports: Some(vec![ContainerPort {
-                            name: Some("http".into()),
-                            container_port: spec.server.port.into(),
-                            protocol: Some("TCP".into()),
-                            ..Default::default()
-                        }]),
-                        // A slow first S3 listing: up to 5 minutes to start.
-                        startup_probe: Some(probe("/readyz", scheme, 5, 60)),
-                        readiness_probe: Some(probe("/readyz", scheme, 10, 3)),
-                        liveness_probe: Some(probe("/healthz", scheme, 10, 6)),
-                        // The image has no shell: the kubelet sleeps, the
-                        // endpoints drain.
-                        lifecycle: Some(Lifecycle {
-                            pre_stop: Some(LifecycleHandler {
-                                sleep: Some(SleepAction { seconds: 5 }),
-                                ..Default::default()
-                            }),
-                            ..Default::default()
-                        }),
-                        resources: Some(spec.resources.clone().unwrap_or_else(default_resources)),
-                        security_context: Some(
-                            spec.security_context
-                                .clone()
-                                .unwrap_or_else(restricted_container_security),
-                        ),
-                        volume_mounts: Some(mounts),
-                        ..Default::default()
-                    }],
+                    containers: vec![container],
                     ..Default::default()
                 }),
             },
@@ -521,7 +629,7 @@ pub fn objects(input: &WorkloadInput<'_>) -> Vec<OwnedObject> {
             metadata: service_meta,
             spec: Some(ServiceSpec {
                 type_: Some(spec.service.r#type.as_str().into()),
-                selector: Some(selector(input.name)),
+                selector: Some(role_selector(input.name, Role::Server)),
                 ports: Some(vec![ServicePort {
                     name: Some("http".into()),
                     port: spec.service.port,
@@ -535,7 +643,27 @@ pub fn objects(input: &WorkloadInput<'_>) -> Vec<OwnedObject> {
         },
         false,
     ));
-    out.push(OwnedObject::of(&deployment(input), false));
+    if input.worker.is_some() {
+        out.push(OwnedObject::of(&deployment(input, Role::Worker), false));
+    }
+    out.push(OwnedObject::of(&deployment(input, Role::Server), false));
+    if input.replicas > 1 {
+        out.push(OwnedObject::of(
+            &PodDisruptionBudget {
+                metadata: meta(input, names.workload(), "server"),
+                spec: Some(PodDisruptionBudgetSpec {
+                    min_available: Some(IntOrString::Int(1)),
+                    selector: Some(LabelSelector {
+                        match_labels: Some(role_selector(input.name, Role::Server)),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            false,
+        ));
+    }
     if let Some(policy) = &spec.network_policy {
         out.push(OwnedObject::of(
             &network_policy(
@@ -559,12 +687,15 @@ pub fn objects(input: &WorkloadInput<'_>) -> Vec<OwnedObject> {
 /// `(apiVersion, kind, name)`. Claims are never removed.
 pub fn removed(input: &WorkloadInput<'_>) -> Vec<(&'static str, &'static str, String)> {
     let mut out = Vec::new();
+    let names = Names(input.name);
     if input.spec.network_policy.is_none() {
-        out.push((
-            "networking.k8s.io/v1",
-            "NetworkPolicy",
-            Names(input.name).workload(),
-        ));
+        out.push(("networking.k8s.io/v1", "NetworkPolicy", names.workload()));
+    }
+    if input.replicas < 2 {
+        out.push(("policy/v1", "PodDisruptionBudget", names.workload()));
+    }
+    if input.worker.is_none() && input.remove_worker {
+        out.push(("apps/v1", "Deployment", names.worker()));
     }
     out
 }
@@ -586,6 +717,10 @@ pub fn sketch(
         boot_hash: "00000000",
         hot_file: "",
         rollout_hash: None,
+        server_hold: None,
+        replicas: spec.replicas,
+        worker: spec.worker.as_ref().filter(|w| w.enabled),
+        remove_worker: false,
     })
 }
 
@@ -609,6 +744,10 @@ mod tests {
             boot_hash: "0123456789abcdef",
             hot_file: "[global]\n",
             rollout_hash: None,
+            server_hold: None,
+            replicas: spec.replicas,
+            worker: spec.worker.as_ref().filter(|w| w.enabled),
+            remove_worker: true,
         }
     }
 
@@ -658,7 +797,7 @@ mod tests {
         );
         assert_eq!(
             container["env"][0],
-            json!({"name": "RUST_LOG", "value": "info,angos::configuration::watcher=info"})
+            json!({"name": "RUST_LOG", "value": "info,angos::configuration::watcher=info,angos::jobs::store=warn"})
         );
         assert_eq!(container["readinessProbe"]["httpGet"]["path"], "/readyz");
         assert_eq!(container["lifecycle"]["preStop"]["sleep"]["seconds"], 5);
@@ -699,7 +838,13 @@ mod tests {
             ]
         );
         assert!(objects[3].create_only);
-        assert!(removed(&i).is_empty());
+        assert_eq!(
+            removed(&i),
+            [
+                ("policy/v1", "PodDisruptionBudget", "reg".to_string()),
+                ("apps/v1", "Deployment", "reg-worker".to_string()),
+            ]
+        );
         let pod = &objects[5].manifest["spec"]["template"];
         assert_eq!(pod["metadata"]["annotations"][CONFIG_HASH_ANNOTATION], "h");
         let container = &pod["spec"]["containers"][0];
@@ -723,7 +868,109 @@ mod tests {
         assert_eq!(objects[5].manifest["spec"]["strategy"]["type"], "Recreate");
         assert_eq!(
             container["env"][0]["value"],
-            "warn,angos::configuration::watcher=info"
+            "warn,angos::configuration::watcher=info,angos::jobs::store=warn"
+        );
+    }
+
+    #[test]
+    fn a_worker_runs_beside_the_server_and_replicas_get_a_budget() {
+        let s = spec(json!({
+            "storage": {"s3": {"endpoint": "https://s3", "bucket": "b", "region": "r",
+                               "credentialsSecretRef": {"name": "s3"}}},
+            "replicas": 3,
+            "worker": {"replicas": 2, "queues": ["cache", "index"], "pollIntervalSeconds": 5},
+        }));
+        let objects = objects(&input(&s));
+        assert_eq!(
+            kinds(&objects),
+            [
+                "Secret/reg-boot-01234567",
+                "Secret/reg-config",
+                "ServiceAccount/reg",
+                "Service/reg",
+                "Deployment/reg-worker",
+                "Deployment/reg",
+                "PodDisruptionBudget/reg",
+            ]
+        );
+        // The Service and the budget select the server's pods only.
+        let server = json!({"app.kubernetes.io/name": "angos", "app.kubernetes.io/instance": "reg",
+                            "app.kubernetes.io/component": "server"});
+        assert_eq!(objects[3].manifest["spec"]["selector"], server);
+        assert_eq!(
+            objects[6].manifest["spec"]["selector"]["matchLabels"],
+            server
+        );
+        assert_eq!(objects[6].manifest["spec"]["minAvailable"], 1);
+        let worker = &objects[4].manifest["spec"];
+        assert_eq!(worker["replicas"], 2);
+        assert_eq!(
+            worker["selector"]["matchLabels"]["app.kubernetes.io/component"],
+            "worker"
+        );
+        let container = &worker["template"]["spec"]["containers"][0];
+        assert_eq!(
+            container["args"],
+            json!([
+                "-c",
+                "/etc/angos/boot/config.toml",
+                "-c",
+                "/etc/angos/hot/config.toml",
+                "worker",
+                "--queue",
+                "cache",
+                "--queue",
+                "index",
+                "--poll-interval",
+                "5s"
+            ])
+        );
+        assert!(container.get("ports").is_none());
+        assert!(container.get("readinessProbe").is_none());
+        assert_eq!(
+            worker["template"]["metadata"]["annotations"][api::annotations::BOOT_HASH],
+            "0123456789abcdef"
+        );
+        assert_eq!(objects[5].manifest["spec"]["replicas"], 3);
+    }
+
+    #[test]
+    fn a_held_server_keeps_its_startup_layer_while_the_worker_moves() {
+        let s = spec(json!({"storage": {"fs": {"volume": {"size": "1Gi"}}}, "worker": {}}));
+        let mut i = input(&s);
+        i.server_hold = Some(("fedcba9876543210", "ghcr.io/project-angos/angos:1.12.2"));
+        let objects = objects(&i);
+        let named = |name: &str| {
+            &objects
+                .iter()
+                .find(|o| o.kind == "Deployment" && o.name == name)
+                .unwrap()
+                .manifest
+        };
+        let worker = &named("reg-worker")["spec"]["template"];
+        let server = &named("reg")["spec"]["template"];
+        assert_eq!(
+            worker["metadata"]["annotations"][api::annotations::BOOT_HASH],
+            "0123456789abcdef"
+        );
+        assert_eq!(
+            server["metadata"]["annotations"][api::annotations::BOOT_HASH],
+            "fedcba9876543210"
+        );
+        assert_eq!(
+            server["spec"]["containers"][0]["image"],
+            "ghcr.io/project-angos/angos:1.12.2"
+        );
+        assert!(
+            server["spec"]["volumes"]
+                .to_string()
+                .contains("reg-boot-fedcba98")
+        );
+        // A single-writer claim: the worker goes where the server is.
+        assert_eq!(
+            worker["spec"]["affinity"]["podAffinity"]["requiredDuringSchedulingIgnoredDuringExecution"]
+                [0]["labelSelector"]["matchLabels"]["app.kubernetes.io/component"],
+            "server"
         );
     }
 

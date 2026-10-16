@@ -630,9 +630,11 @@ spec:
                 type: object
               replicas:
                 default: 1
-                description: One replica until the worker and the shared-store checks land.
+                description: |-
+                  The server's pods. More than one needs an S3 store and
+                  `worker.enabled`, and runs once Angos found the store's conditional
+                  writes atomic (`status.conditionalWrites`); until then, one.
                 format: int32
-                maximum: 1.0
                 minimum: 0.0
                 type: integer
               repositorySelector:
@@ -1231,9 +1233,99 @@ spec:
                     - message: ui.oidc sets clientId or clientIdFrom
                       rule: has(self.clientId) != has(self.clientIdFrom)
                 type: object
+              worker:
+                description: |-
+                  `angos worker`: a `<name>-worker` Deployment draining the background
+                  jobs (cache fills, replication, scans, indexes) from a durable queue
+                  (`[global.job_queue]`) instead of the server's own loops.
+                nullable: true
+                properties:
+                  enabled:
+                    default: true
+                    description: |-
+                      Turning it on or off rolls the server (its queue is a startup
+                      setting): the worker is ready before the server hands it the jobs,
+                      and removed after the server took them back.
+                    type: boolean
+                  jobQueue:
+                    description: '`[global.job_queue]`''s tunables.'
+                    nullable: true
+                    properties:
+                      claimTtlSecs:
+                        description: |-
+                          The lease on a claimed job: a crashed worker's jobs are taken over
+                          after it. Angos: 60.
+                        format: uint64
+                        minimum: 3.0
+                        nullable: true
+                        type: integer
+                      maxAttempts:
+                        description: 'Angos: 5.'
+                        format: uint32
+                        minimum: 1.0
+                        nullable: true
+                        type: integer
+                      pendingReadyHorizonSecs:
+                        description: 'Angos: 600.'
+                        format: uint64
+                        minimum: 0.0
+                        nullable: true
+                        type: integer
+                      pendingRefreshIntervalSecs:
+                        description: 'Angos: 15.'
+                        format: uint64
+                        minimum: 5.0
+                        nullable: true
+                        type: integer
+                      retryBackoffMaxMs:
+                        description: 'Angos: 10000.'
+                        format: uint64
+                        minimum: 0.0
+                        nullable: true
+                        type: integer
+                      retryBackoffMinMs:
+                        description: 'Angos: 100.'
+                        format: uint64
+                        minimum: 0.0
+                        nullable: true
+                        type: integer
+                    type: object
+                  pollIntervalSeconds:
+                    description: '`--poll-interval`: how long an idle worker waits. Angos: 1.'
+                    format: uint64
+                    minimum: 1.0
+                    nullable: true
+                    type: integer
+                  queues:
+                    description: |-
+                      The queues drained (`--queue`): empty, Angos's default (cache,
+                      replication, index, and scan when a scanner is configured).
+                    items:
+                      enum:
+                      - cache
+                      - replication
+                      - scan
+                      - index
+                      type: string
+                    type: array
+                  replicas:
+                    default: 1
+                    format: int32
+                    minimum: 1.0
+                    type: integer
+                  resources:
+                    description: 'Unset: the server''s default (requests 100m CPU / 256Mi, limit 1Gi).'
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                type: object
             required:
             - storage
             type: object
+            x-kubernetes-validations:
+            - message: 'more than one replica needs an S3 store (blobs and metadata): the pods share it'
+              rule: self.replicas <= 1 || (has(self.storage.s3) && (!has(self.storage.metadata) || has(self.storage.metadata.s3)))
+            - message: 'more than one replica needs worker.enabled: the background jobs go to a durable queue the worker drains'
+              rule: self.replicas <= 1 || (has(self.worker) && self.worker.enabled)
           status:
             description: |-
               The status of an `AngosLocalInstance`: what runs, and where the last
@@ -1245,6 +1337,11 @@ spec:
                 nullable: true
                 type: string
               availableReplicas:
+                format: int32
+                nullable: true
+                type: integer
+              availableWorkers:
+                description: The worker's available pods.
                 format: int32
                 nullable: true
                 type: integer
@@ -1260,6 +1357,34 @@ spec:
                 items:
                   type: string
                 type: array
+              conditionalWrites:
+                description: |-
+                  What Angos found of the metadata store's conditional writes when the
+                  durable queue started: more than one server pod runs only on a store
+                  found atomic.
+                nullable: true
+                properties:
+                  atomic:
+                    description: |-
+                      `true`: a second create of the same key failed (`If-None-Match: *`
+                      honoured); `false`: Angos fell back to advisory claims.
+                    type: boolean
+                  observedTime:
+                    type: string
+                  pod:
+                    description: The pod read, and when.
+                    type: string
+                  store:
+                    description: |-
+                      The store probed (endpoint, bucket, prefix), as the startup layer
+                      names it.
+                    type: string
+                required:
+                - atomic
+                - observedTime
+                - pod
+                - store
+                type: object
               conditions:
                 default: []
                 description: |-

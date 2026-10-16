@@ -45,6 +45,10 @@ pub use self::AngosLocalInstanceSpec as LocalInstanceSpec;
         "size(self.metadata.name) <= 63 && self.metadata.name.matches('^[a-z]([-a-z0-9]*[a-z0-9])?$')"
     ).message("the instance's name names its Service: a DNS-1035 label (lowercase letters, digits and '-', starting with a letter), at most 63 characters")
 )]
+#[schemars(extend("x-kubernetes-validations" = [
+    {"rule": "self.replicas <= 1 || (has(self.storage.s3) && (!has(self.storage.metadata) || has(self.storage.metadata.s3)))", "message": "more than one replica needs an S3 store (blobs and metadata): the pods share it"},
+    {"rule": "self.replicas <= 1 || (has(self.worker) && self.worker.enabled)", "message": "more than one replica needs worker.enabled: the background jobs go to a durable queue the worker drains"}
+]))]
 #[serde(rename_all = "camelCase")]
 pub struct AngosLocalInstanceSpec {
     /// The Angos image. Its repository must be one the operator allows
@@ -53,10 +57,17 @@ pub struct AngosLocalInstanceSpec {
     pub image: Image,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub image_pull_secrets: Vec<LocalObjectReference>,
-    /// One replica until the worker and the shared-store checks land.
+    /// The server's pods. More than one needs an S3 store and
+    /// `worker.enabled`, and runs once Angos found the store's conditional
+    /// writes atomic (`status.conditionalWrites`); until then, one.
     #[serde(default = "one")]
-    #[schemars(range(min = 0, max = 1))]
+    #[schemars(range(min = 0))]
     pub replicas: i32,
+    /// `angos worker`: a `<name>-worker` Deployment draining the background
+    /// jobs (cache fills, replication, scans, indexes) from a durable queue
+    /// (`[global.job_queue]`) instead of the server's own loops.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker: Option<Worker>,
     /// Unset: requests 100m CPU / 256Mi, limit 1Gi.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "open_object")]
@@ -154,6 +165,7 @@ impl Default for AngosLocalInstanceSpec {
             image: Image::default(),
             image_pull_secrets: Vec::new(),
             replicas: one(),
+            worker: None,
             resources: None,
             service: Service::default(),
             service_account: ServiceAccount::default(),
@@ -324,6 +336,98 @@ pub struct NetworkPolicy {
     pub egress_to: Vec<NetworkPolicyPeer>,
 }
 
+/// `angos worker` and its queue (spec 6.3).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Worker {
+    /// Turning it on or off rolls the server (its queue is a startup
+    /// setting): the worker is ready before the server hands it the jobs,
+    /// and removed after the server took them back.
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    #[serde(default = "one")]
+    #[schemars(range(min = 1))]
+    pub replicas: i32,
+    /// The queues drained (`--queue`): empty, Angos's default (cache,
+    /// replication, index, and scan when a scanner is configured).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queues: Vec<Queue>,
+    /// `--poll-interval`: how long an idle worker waits. Angos: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub poll_interval_seconds: Option<u64>,
+    /// Unset: the server's default (requests 100m CPU / 256Mi, limit 1Gi).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "open_object")]
+    pub resources: Option<ResourceRequirements>,
+    /// `[global.job_queue]`'s tunables.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job_queue: Option<JobQueue>,
+}
+
+impl Default for Worker {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            replicas: one(),
+            queues: Vec::new(),
+            poll_interval_seconds: None,
+            resources: None,
+            job_queue: None,
+        }
+    }
+}
+
+#[derive(
+    Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum Queue {
+    Cache,
+    Replication,
+    Scan,
+    Index,
+}
+
+impl Queue {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Queue::Cache => "cache",
+            Queue::Replication => "replication",
+            Queue::Scan => "scan",
+            Queue::Index => "index",
+        }
+    }
+}
+
+/// `[global.job_queue]`.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct JobQueue {
+    /// The lease on a claimed job: a crashed worker's jobs are taken over
+    /// after it. Angos: 60.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 3))]
+    pub claim_ttl_secs: Option<u64>,
+    /// Angos: 15.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 5))]
+    pub pending_refresh_interval_secs: Option<u64>,
+    /// Angos: 600.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_ready_horizon_secs: Option<u64>,
+    /// Angos: 5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub max_attempts: Option<u32>,
+    /// Angos: 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_backoff_min_ms: Option<u64>,
+    /// Angos: 10000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_backoff_max_ms: Option<u64>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PruneLock {
@@ -374,9 +478,14 @@ pub fn object_sharing(instance: &LocalInstance) -> Option<SharedWith> {
 pub struct Names<'a>(pub &'a str);
 
 impl Names<'_> {
-    /// The `Deployment`, `Service`, `ServiceAccount` and `NetworkPolicy`.
+    /// The `Deployment`, `Service`, `ServiceAccount`, `NetworkPolicy` and
+    /// `PodDisruptionBudget`.
     pub fn workload(&self) -> String {
         self.0.to_string()
+    }
+    /// The worker's `Deployment`.
+    pub fn worker(&self) -> String {
+        format!("{}-worker", self.0)
     }
     /// The hot layer's `Secret`.
     pub fn config(&self) -> String {

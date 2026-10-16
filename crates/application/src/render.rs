@@ -235,7 +235,17 @@ pub fn model(spec: &LocalInstanceSpec, resolved: &Resolved) -> AngosConfig {
         allow_missing_manifest_references: g.allow_missing_manifest_references,
         authorization_webhook: None,
         event_webhooks: Vec::new(),
-        job_queue: None::<JobQueue>,
+        job_queue: spec.worker.as_ref().filter(|w| w.enabled).map(|w| {
+            let q = w.job_queue.clone().unwrap_or_default();
+            JobQueue {
+                claim_ttl_secs: q.claim_ttl_secs,
+                pending_refresh_interval_secs: q.pending_refresh_interval_secs,
+                pending_ready_horizon_secs: q.pending_ready_horizon_secs,
+                max_attempts: q.max_attempts,
+                retry_backoff_min_ms: q.retry_backoff_min_ms,
+                retry_backoff_max_ms: q.retry_backoff_max_ms,
+            }
+        }),
         scan: None,
         index: resolved.index.clone(),
         shutdown_drain_secs: g.shutdown_drain_secs,
@@ -413,6 +423,15 @@ pub fn render(spec: &LocalInstanceSpec, resolved: &Resolved) -> Result<Rendered,
         .iter()
         .map(Violation::to_string)
         .collect();
+    if config.global.scan.is_none()
+        && spec
+            .worker
+            .as_ref()
+            .is_some_and(|w| w.enabled && w.queues.contains(&api::local_instance::Queue::Scan))
+    {
+        // `angos worker` would stop at startup.
+        problems.push("spec.worker.queues: the scan queue needs a scanner (spec.scan)".into());
+    }
     let mut layers = config.split();
     let extra_config_used = !spec.extra_config.is_empty();
     if extra_config_used {

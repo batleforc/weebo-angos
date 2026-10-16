@@ -419,6 +419,39 @@ done
 [ -n "$(kubectl -n team-a get angosmaintenance prune -o jsonpath='{.status.lastDryRun.time}')" ] \
   || fail "prune: no dry-run report"
 
+step "a worker, then two server pods once Angos probed the store"
+kubectl -n team-a patch angoslocalinstance secure --type merge \
+  -p '{"spec":{"replicas":2,"worker":{"enabled":true}}}'
+for _ in $(seq 1 150); do
+  writes="$(kubectl -n team-a get angoslocalinstance secure -o jsonpath='{.status.conditionalWrites.atomic}')"
+  got="$(kubectl -n team-a get angoslocalinstance secure \
+    -o jsonpath='{.status.conditions[?(@.type=="Ready")].reason}')"
+  [ -n "$writes" ] && [ "$got" = Reconciled ] && break
+  sleep 2
+done
+[ -n "$writes" ] || fail "secure: Angos's probe of the store was never read"
+[ "$got" = Reconciled ] || fail "secure: Ready reason is ${got:-<none>} with the worker"
+echo "RustFS conditional writes atomic: $writes"
+kubectl -n team-a rollout status deployment/secure-worker --timeout="$WAIT"
+[ "$(kubectl -n team-a get angoslocalinstance secure -o jsonpath='{.status.availableWorkers}')" -ge 1 ] \
+  || fail "secure: no worker available"
+if [ "$writes" = true ]; then
+  for _ in $(seq 1 90); do
+    [ "$(kubectl -n team-a get deployment secure -o jsonpath='{.status.readyReplicas}')" = 2 ] && break
+    sleep 2
+  done
+  [ "$(kubectl -n team-a get deployment secure -o jsonpath='{.status.readyReplicas}')" = 2 ] \
+    || fail "secure: not scaled to 2 on an atomic store"
+  kubectl -n team-a get poddisruptionbudget secure >/dev/null || fail "secure: no PodDisruptionBudget"
+else
+  kubectl -n team-a get angoslocalinstance secure \
+    -o jsonpath='{.status.conditions[?(@.type=="ReplicasHeld")].status}' | grep -q True \
+    || fail "secure: advisory claims but the replicas aren't held"
+fi
+# The Service reaches the server only.
+code="$(registry -k https://secure.team-a.svc:8000/readyz)"
+[ "$code" = 200 ] || fail "secure: /readyz answered $code with the worker"
+
 step "the webhook refuses what the operator wouldn't run"
 if kubectl apply -f - 2>/dev/null <<'YAML'
 apiVersion: angos.weebo.io/v1alpha1

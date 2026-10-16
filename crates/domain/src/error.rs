@@ -51,8 +51,15 @@ weebo_kit_domain::reason_codes! {
         /// "true"` lets it through.
         DisruptiveUpdatePending,
         /// The instance's pods aren't ready on the desired startup layer
-        /// yet (rolling out, or not scheduled).
+        /// yet (rolling out, or not scheduled; the worker before the server
+        /// when the durable queue is turned on).
         WorkloadNotReady,
+        /// `replicas > 1` runs one server pod: Angos hasn't probed the
+        /// store's conditional writes yet, or found them not atomic (claims
+        /// and immutable tags would race). The annotation
+        /// `angos.weebo.io/allow-advisory-claims: "true"` lets the replicas
+        /// through anyway.
+        ReplicasHeld,
         /// The new pods don't start (crash loop, `/readyz` never ready): the
         /// message quotes the last error they logged. The previous pods
         /// keep serving.
@@ -167,6 +174,7 @@ impl ReasonCode {
             ReasonCode::Reconciled
             | ReasonCode::StorageChangePending
             | ReasonCode::DisruptiveUpdatePending
+            | ReasonCode::ReplicasHeld
             | ReasonCode::ReloadUnconfirmed
             | ReasonCode::MaintenanceSkipped
             | ReasonCode::MaintenanceDeferred
