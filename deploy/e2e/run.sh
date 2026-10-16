@@ -533,6 +533,101 @@ done
 kubectl -n team-a get events --field-selector reason=Upgraded -o name | grep -q . \
   || fail "upgrade: no Upgraded Event"
 
+step "the weebo-si importer: its real values, the same store, a prune dry run that deletes nothing"
+kubectl apply -f "$HERE/weebo-si.yaml"
+kubectl -n team-a wait --for=condition=complete job/rustfs-bucket-angos --timeout="$WAIT"
+kubectl -n weebo-si rollout status deploy/valkey --timeout="$WAIT"
+# The Secret the importer's ExternalSecret writes, from what kind has.
+kubectl -n weebo-si create secret generic angos-operator \
+  --from-literal=access-key-id=angos-e2e --from-literal=secret-key=angos-e2e-secret \
+  --from-literal=redis-url=redis://valkey.weebo-si.svc:6379 \
+  --from-literal=token-key="$(head -c 32 /dev/urandom | base64)" \
+  --from-literal=AUTHENTIK_URL=https://auth.example.invalid/application/o/angos/ \
+  --from-literal=AUTHENTIK_CLIENT_ID=angos-e2e \
+  --dry-run=client -o yaml | kubectl label --local -f - angos.weebo.io/credential=true -o yaml \
+  | kubectl apply -f -
+# weebo-si's values as they are, but its S3 and its CA bundle: kind's.
+values="$(mktemp)"
+sed -e 's|s3Url: .*|s3Url: "http://rustfs.team-a.svc:9000"|' \
+  -e '/^  caTrust:/,/enabled:/ s/enabled: true/enabled: false/' \
+  "$HERE/../../crates/importer/tests/fixtures/weebo-si-values.yaml" >"$values"
+imported="$(mktemp)"
+"${ENGINE:-docker}" run --rm -i --entrypoint /usr/local/bin/weebo-angos-importer "$IMAGE" \
+  --values - --namespace weebo-si --no-external-secret <"$values" >"$imported"
+grep -c '^kind: ' "$imported"
+kubectl apply -f "$imported"
+si() { kubectl -n weebo-si get "$@"; }
+for _ in $(seq 1 120); do
+  [ "$(si angoslocalinstance registry -o jsonpath='{.status.conditions[?(@.type=="Ready")].reason}')" = Reconciled ] && break
+  sleep 2
+done
+[ "$(si angoslocalinstance registry -o jsonpath='{.status.version}')" = 1.12.2 ] \
+  || fail "weebo-si: the imported instance isn't Ready on 1.12.2 ($(si angoslocalinstance registry -o jsonpath='{.status.conditions}'))"
+for repo in hub ghcr quay weebo; do
+  for _ in $(seq 1 60); do
+    [ "$(si angosrepository "$repo" -o jsonpath='{.status.conditions[?(@.type=="Ready")].reason}')" = Reconciled ] && break
+    sleep 2
+  done
+  [ "$(si angosrepository "$repo" -o jsonpath='{.status.conditions[?(@.type=="Ready")].reason}')" = Reconciled ] \
+    || fail "weebo-si: repository $repo not Reconciled"
+done
+# An image in the local registry (pushed by a test identity: the imported
+# rights are weebo's OIDC provider).
+kubectl apply -f - <<'YAML'
+apiVersion: angos.weebo.io/v1alpha1
+kind: AngosIdentity
+metadata:
+  name: e2e
+  namespace: weebo-si
+spec:
+  instanceRef: { name: registry }
+YAML
+kubectl -n weebo-si patch angosrepository weebo --type json \
+  -p '[{"op":"add","path":"/spec/access/push/-","value":"identity:e2e"},{"op":"add","path":"/spec/access/pull/-","value":"identity:e2e"}]'
+cr_reason_is_in() {
+  for _ in $(seq 1 90); do
+    [ "$(si "$1" "$2" -o jsonpath='{.status.conditions[?(@.type=="Ready")].reason}')" = Reconciled ] \
+      && [ "$(si "$1" "$2" -o jsonpath='{.status.observedGeneration}')" = "$(si "$1" "$2" -o jsonpath='{.metadata.generation}')" ] \
+      && return 0
+    sleep 2
+  done
+  fail "weebo-si: $1 $2 not Reconciled"
+}
+cr_reason_is_in angosidentity e2e
+cr_reason_is_in angosrepository weebo
+password="$(si secret e2e-credentials -o jsonpath='{.data.password}' | base64 -d)"
+si_base=http://registry.weebo-si.svc:8000/v2/weebo/e2e
+config_digest=sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a
+code="$(registry -u "e2e:$password" -X POST --data-binary '{}' \
+  -H 'Content-Type: application/octet-stream' "$si_base/blobs/uploads/?digest=$config_digest")"
+[ "$code" = 201 ] || fail "weebo-si: the config blob push answered $code"
+manifest='{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","config":{"mediaType":"application/vnd.oci.image.config.v1+json","digest":"'"$config_digest"'","size":2},"layers":[]}'
+code="$(registry -u "e2e:$password" -X PUT --data-binary "$manifest" \
+  -H 'Content-Type: application/vnd.oci.image.manifest.v1+json' "$si_base/manifests/v1")"
+[ "$code" = 201 ] || fail "weebo-si: the manifest push answered $code"
+# The prune, a dry run as imported: resumed for one run.
+kubectl -n weebo-si patch angosmaintenance registry-prune --type merge -p '{"spec":{"suspend":false}}'
+kubectl -n weebo-si annotate angosmaintenance registry-prune angos.weebo.io/run-now="$(date +%s)" --overwrite
+for _ in $(seq 1 120); do
+  state="$(si angosmaintenance registry-prune -o jsonpath='{.status.lastRun.state}')"
+  [ "$state" = Succeeded ] && break
+  case "$state" in Failed|TimedOut|Interrupted)
+    fail "weebo-si: prune $state: $(si angosmaintenance registry-prune -o jsonpath='{.status.lastRun.message}')" ;;
+  esac
+  sleep 2
+done
+[ "$state" = Succeeded ] || fail "weebo-si: the prune dry run never ended ($(si angosmaintenance registry-prune -o jsonpath='{.status.conditions}'))"
+job="$(si angosmaintenance registry-prune -o jsonpath='{.status.lastRun.jobName}')"
+report="$(kubectl -n weebo-si logs "job/$job")"
+printf '%s\n' "$report" | grep -q '"prune' || printf '%s\n' "$report" | tail -5
+if printf '%s\n' "$report" | grep -E 'DRY RUN: would (delete|remove|revoke)'; then
+  fail "weebo-si: the prune dry run would delete something"
+fi
+echo "weebo-si: prune dry run, zero deletion"
+code="$(registry -u "e2e:$password" -o /dev/null "$si_base/manifests/v1" \
+  -H 'Accept: application/vnd.oci.image.manifest.v1+json')"
+[ "$code" = 200 ] || fail "weebo-si: the pushed image answered $code"
+
 step "the webhook refuses what the operator wouldn't run"
 if kubectl apply -f - 2>/dev/null <<'YAML'
 apiVersion: angos.weebo.io/v1alpha1

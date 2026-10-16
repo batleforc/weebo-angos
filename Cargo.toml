@@ -8,6 +8,7 @@ members = [
     "crates/adapters-inbound",
     "crates/operator",
     "crates/crdgen",
+    "crates/importer",
     "crates/testkit",
 ]
 

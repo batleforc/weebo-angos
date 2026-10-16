@@ -1,0 +1,73 @@
+---
+title: Migrate from weebo-si's chart
+description: Move the Angos release of weebo-si (2.argo/helm/angos) under the operator, without moving any data.
+---
+
+The operator serves **the same store**: same bucket, same endpoint, no key
+prefix, repositories with byte-for-byte identical prefixes. Every piece of
+state (images, tags, uploads, the job queue) lives in S3, so nothing is
+copied. The token service keeps its key, so no client reconnects.
+
+## 1. Import
+
+`weebo-angos-importer` ships in the operator image. It reads the
+release's values and prints the CRs, for review. It writes nothing to the
+cluster.
+
+```bash
+helm get values --all -o yaml angos -n angos > values.yaml
+docker run --rm -i --entrypoint /usr/local/bin/weebo-angos-importer \
+  ghcr.io/batleforc/weebo-angos-operator:<version> \
+  --values - --namespace angos < values.yaml > angos.yaml
+```
+
+It prints, after a comment listing what to check first:
+
+| Object | From |
+| --- | --- |
+| `ExternalSecret` `angos-operator` | the chart's Vault paths (`mv/angos/{s3,config,auth,scanner}`) as plain keys, labelled `angos.weebo.io/credential: "true"` |
+| `AngosLocalInstance` `registry` | S3, cache (Valkey), OIDC `weebo` (`issuerFrom`/`audienceFrom`), `auth.kubernetes`, the token service and its key, the UI, the CA bundle, the policy (`browse` → `catalog`, `jobs`, `admin`) |
+| one `AngosRepository` per `repositories` entry | prefixes, upstreams, access 1:1 |
+| `AngosIdentity` `scanner` (with the scanner) | its password adopted (`adoptSecretRef`) |
+| `AngosMaintenance` `registry-scrub`, `registry-prune` | **suspended**, the prune as a **dry run** |
+
+The instance is named `registry`, not `angos`: the chart's Service and
+Deployment keep that name until the cutover. Kept as they are: the S3
+region (`us-east-`, truncated in the chart, but it identifies the store)
+and the image tag (1.12.2). Change them after the cutover.
+
+## 2. Cutover
+
+1. Suspend the chart's CronJobs, **`angos-prune` first**
+   (`maintenance.jobs.prune.enabled: false`).
+2. Apply `angos.yaml`, wait for `Ready`:
+   `kubectl -n angos get ali,arepo,amaint`.
+3. Run the operator's prune **dry run**: set `suspend: false` on
+   `registry-prune` (still `dryRun: true`) and annotate it
+   `angos.weebo.io/run-now=$(date +%s)`. Its report
+   (`status.lastDryRun`, the Job's log) must show **no** `DRY RUN: would
+   delete` line. Anything listed would be lost at the first real prune:
+   find which prefix is missing before going on.
+4. Point the IngressRoute at the Service `registry` (port 8000).
+5. Scale the chart's Deployment to 0, then remove it from the chart.
+6. Run a scrub on the operator's side (dry run, then real) and check
+   `_lost_and_found/` in the bucket.
+7. Resume the maintenances (`suspend: false`; the prune with
+   `dryRun: false` once a dry run was read).
+
+What stays in gitops: the IngressRoute and its Certificate, the
+ServiceAccount `angos` and its binding to
+`system:service-account-issuer-discovery`, the kubelet's credential
+provider and its node RBAC, the SecretStore, the scanner (StatefulSet).
+
+With the scanner, once the `AngosIdentity` owns the identity, drop it from
+terraform's state (`tofu state rm` of the scanner's resources in
+`2.terra/vault/terra-map/angos.tf`).
+
+## Rolling back
+
+Until step 5, the chart's Deployment still serves: point the IngressRoute
+back at `angos` and delete the CRs (the repositories need
+`angos.weebo.io/allow-data-deletion: "true"`, which only allows the
+operator's next prune to clear their namespaces; with the prune suspended,
+nothing is erased).
