@@ -1,0 +1,25 @@
+{{ include "weebo-operator.notes" . }}
+
+1. Connect a Angos with an API token:
+
+     kubectl -n {{ .Release.Namespace }} create secret generic angos-admin --from-literal=token=<token>
+
+     kubectl apply -f - <<YAML
+     apiVersion: angos.weebo.io/v1alpha1
+     kind: AngosInstance
+     metadata:
+       name: main
+     spec:
+       url: https://angos.example.com
+       tokenSecretRef:
+         namespace: {{ .Release.Namespace }}
+         name: angos-admin
+         key: token
+     YAML
+
+2. Then declare AngosObject resources referencing it
+   (`spec.instanceRef: main`).
+
+Argo CD: paste the health check of the
+{{ include "weebo-operator.fullname" . }}-argocd-health ConfigMap into argocd-cm under
+`resource.customizations.health.angos.weebo.io_*`.
