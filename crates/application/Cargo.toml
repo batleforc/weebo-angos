@@ -15,7 +15,9 @@ thiserror = { workspace = true }
 [dev-dependencies]
 kube = { workspace = true }
 tokio = { workspace = true }
+weebo-kit-application = { workspace = true, features = ["test-support"] }
 
 [features]
-# Exposes `test_support` (in-memory gateway) to other crates' tests.
-test-support = []
+# Exposes `test_support` (the kit's in-memory owned objects and pod logs)
+# to other crates' tests.
+test-support = ["weebo-kit-application/test-support"]

@@ -7,10 +7,9 @@ use std::time::Duration;
 
 use adapters_inbound::controller::{self, Ctx, Shutdown};
 use adapters_inbound::webhook;
-use adapters_outbound::{HttpGatewayFactory, OperatorInstances};
-use api::{Instance, LocalInstance, Object};
+use adapters_outbound::LocalInstanceDirectory;
+use api::LocalInstance;
 use kube::Client;
-use kube::api::ApiResource;
 use kube::runtime::events::{Recorder, Reporter};
 use weebo_kit_runtime::store::spawn_reflector;
 use weebo_kit_runtime::{Health, WatchScope, leader, telemetry, webhook_server};
@@ -32,7 +31,6 @@ async fn main() -> anyhow::Result<()> {
             );
             Ok(())
         }
-        Some("migrate-instance-ref") => migrate_instance_ref().await,
         Some(other) => Err(anyhow::anyhow!("unknown command {other:?}")),
         None => run(&telemetry).await,
     };
@@ -41,34 +39,6 @@ async fn main() -> anyhow::Result<()> {
     }
     telemetry.shutdown();
     result
-}
-
-/// `migrate-instance-ref [--dry-run]`: rewrites the CRs written when
-/// `spec.instanceRef` was a bare name (`main` → `{name: main}`). Offline:
-/// operator stopped, new CRDs applied, then this, then the operator.
-async fn migrate_instance_ref() -> anyhow::Result<()> {
-    let dry_run = std::env::args().any(|a| a == "--dry-run");
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let client = Client::try_default().await?;
-    let kinds = [ApiResource::erase::<Object>(&())];
-    let migration = weebo_kit_adapters::migrate::migrate_instance_refs(
-        &client,
-        &kinds,
-        controller::FIELD_MANAGER,
-        dry_run,
-    )
-    .await
-    .map_err(|e| anyhow::anyhow!(e))?;
-    let verb = if dry_run { "to migrate" } else { "migrated" };
-    for id in &migration.migrated {
-        println!("{verb}: {id}");
-    }
-    println!(
-        "{} {verb}, {} unchanged",
-        migration.migrated.len(),
-        migration.unchanged
-    );
-    Ok(())
 }
 
 async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
@@ -88,10 +58,6 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     // the scope can't watch.
     let scope = WatchScope::from_env()?;
     scope.ensure::<LocalInstance>()?;
-    scope.ensure::<Object>()?;
-    if scope.cluster_kinds() {
-        scope.ensure::<Instance>()?;
-    }
     tracing::info!(
         namespace = ?scope.watched_namespace(),
         selector = ?scope.selector(),
@@ -104,16 +70,7 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     let shutdown = Shutdown::on_termination()?;
     let health = Arc::new(Health::default());
 
-    // Every resolution reads the instances: one reflector per kind (no
-    // AngosInstance without cluster-scoped kinds).
-    let cluster_store = scope.cluster_kinds().then(|| {
-        spawn_reflector(
-            scope.api::<Instance>(client.clone()),
-            &scope,
-            health.clone(),
-            "AngosInstance reflector",
-        )
-    });
+    // Every resolution reads the instances: one reflector.
     let local_store = spawn_reflector(
         scope.api::<LocalInstance>(client.clone()),
         &scope,
@@ -121,19 +78,17 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
         "AngosLocalInstance reflector",
     );
     let instances = Arc::new(
-        OperatorInstances::new(client.clone())
+        LocalInstanceDirectory::new(client.clone())
             .with_scope(
                 scope.watched_namespace().map(String::from),
                 scope.selector().cloned(),
-                scope.cluster_kinds(),
             )
-            .with_stores(cluster_store, Some(local_store)),
+            .with_store(local_store),
     );
 
     let holder_id = std::env::var("HOSTNAME").unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
     let ctx = Arc::new(Ctx {
         client: client.clone(),
-        gateways: Arc::new(HttpGatewayFactory::new(client.clone(), instances.clone())),
         instances,
         recorder: Recorder::new(
             client.clone(),
@@ -160,7 +115,7 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     .await?;
 
     // The controllers, in contrast, run on one replica at a time: two
-    // active reconcilers could both create the same remote object.
+    // active reconcilers would write the same objects.
     let leadership = tokio::select! {
         leadership = leader::acquire_leadership(&client, holder_id, DEFAULT_LEASE_NAME) => leadership,
         () = shutdown.wait() => {
@@ -170,16 +125,7 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     };
 
     tracing::info!("starting controllers");
-    let cluster_instances = async {
-        if ctx.scope.cluster_kinds() {
-            controller::instance::run(client.clone(), ctx.clone()).await;
-        }
-    };
-    tokio::join!(
-        cluster_instances,
-        controller::local_instance::run(client.clone(), ctx.clone()),
-        controller::object::run(client.clone(), ctx.clone()),
-    );
+    controller::local_instance::run(client.clone(), ctx.clone()).await;
     // Every controller returns once the shutdown signal arrived and its
     // in-flight reconciles finished: hand the lease over right away
     // instead of making the next leader wait out the TTL.

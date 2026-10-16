@@ -19,5 +19,4 @@ rustls = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
-weebo-kit-adapters = { workspace = true }
 weebo-kit-runtime = { workspace = true }

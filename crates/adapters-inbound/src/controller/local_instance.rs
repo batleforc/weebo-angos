@@ -1,13 +1,10 @@
-//! `AngosLocalInstance` (namespaced): the same connectivity and token
-//! check as a `AngosInstance`, with the token of its own namespace.
-//! No finalizer either.
+//! `AngosLocalInstance` (namespaced): the instance's workload and
+//! configuration (`reconcile_instance`).
 
 use std::sync::Arc;
 use std::time::Instant;
 
 use api::LocalInstance;
-use application::ports::BoundInstance;
-use application::use_cases::Outcome;
 use application::use_cases::reconcile_instance::reconcile_instance;
 use kube::api::Api;
 use kube::runtime::controller::Action;
@@ -32,11 +29,7 @@ async fn reconcile(obj: Arc<LocalInstance>, ctx: Arc<Ctx>) -> Result<Action, Err
     let namespace = obj.namespace().unwrap_or_default();
     let api: Api<LocalInstance> = Api::namespaced(ctx.client.clone(), &namespace);
     let started = Instant::now();
-    let bound = BoundInstance::local(namespace, obj.name_any());
-    let outcome = match ctx.gateways.gateway_for(&bound).await {
-        Ok(gateway) => reconcile_instance(gateway.as_ref()).await,
-        Err(e) => Outcome::failed(e),
-    };
+    let outcome = reconcile_instance(obj.as_ref());
     super::record_reconcile(KIND, started, &outcome);
     super::publish(&api, &ctx.recorder, obj.as_ref(), &outcome).await?;
     Ok(super::requeue_after(&outcome))

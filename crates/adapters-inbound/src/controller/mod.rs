@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use api::Status;
 use api::status::Condition;
-use application::ports::{BoundInstance, GatewayFactory, InstanceDirectory};
+use application::ports::{BoundInstance, InstanceDirectory};
 use application::use_cases::Outcome;
 use domain::Failure;
 use domain::error::ReasonCode;
@@ -33,9 +33,7 @@ pub use weebo_kit_runtime::Shutdown;
 /// liveness.
 pub use weebo_kit_runtime::controller::{controller, drive};
 
-pub mod instance;
 pub mod local_instance;
-pub mod object;
 
 /// Field manager of the status patches, meter and Event reporter name.
 pub const FIELD_MANAGER: &str = "weebo-angos-operator";
@@ -47,9 +45,8 @@ pub const METRIC_PREFIX: &str = "weebo_angos";
 /// injected once, in `operator::main` (tests inject fakes).
 pub struct Ctx {
     pub client: Client,
-    pub gateways: Arc<dyn GatewayFactory>,
-    /// Which instance a CR lives on (the kit's `Instances`, on the watch
-    /// scope).
+    /// Which instance a CR lives on (the kit's `LocalInstances`, on the
+    /// watch scope).
     pub instances: Arc<dyn InstanceDirectory>,
     /// One recorder for the whole process: the kit folds repeated Events
     /// into a series only within a recorder.
@@ -130,19 +127,9 @@ pub fn record_reconcile(kind: &'static str, started: Instant, outcome: &Outcome)
 pub trait HasStatus {
     fn status(&self) -> Option<&Status>;
 
-    fn remote_id(&self) -> Option<&str> {
-        self.status()?.remote_id.as_deref()
-    }
-
     /// The instance recorded at the last resolution.
     fn bound_instance(&self) -> Option<&BoundInstance> {
         self.status()?.instance.as_ref()
-    }
-}
-
-impl HasStatus for api::Instance {
-    fn status(&self) -> Option<&Status> {
-        self.status.as_ref()
     }
 }
 
@@ -152,18 +139,11 @@ impl HasStatus for api::LocalInstance {
     }
 }
 
-impl HasStatus for api::Object {
-    fn status(&self) -> Option<&Status> {
-        self.status.as_ref()
-    }
-}
-
 /// Publishes `outcome` on `obj` (read fresh from the API server: its
 /// conditions are the previous ones). The kit's: one merge patch
-/// (conditions, `observedGeneration` on success, `remoteId`), retried while
-/// the apiserver is unavailable, then a `Warning` on every failed reconcile
-/// and a `Normal` for every condition change. One more Event when the
-/// remote object was just created.
+/// (conditions, `observedGeneration` on success, the bound instance),
+/// retried while the apiserver is unavailable, then a `Warning` on every
+/// failed reconcile and a `Normal` for every condition change.
 pub async fn publish<K>(
     api: &Api<K>,
     recorder: &Recorder,
@@ -178,9 +158,6 @@ where
         .map(|s| s.conditions.as_slice())
         .unwrap_or_default();
     let mut fields = serde_json::Map::new();
-    if let Some(id) = &outcome.remote_id {
-        fields.insert("remoteId".into(), id.clone().into());
-    }
     if let Some(instance) = &outcome.instance {
         let instance = serde_json::to_value(instance).expect("a BoundInstance serializes");
         fields.insert("instance".into(), instance);
@@ -193,23 +170,11 @@ where
         previous,
         StatusUpdate {
             ready: &outcome.ready,
-            advisories: &[],
+            advisories: &outcome.advisories,
             fields,
         },
     )
     .await?;
-    if let Some(id) = &outcome.remote_id
-        && obj.remote_id().is_none()
-    {
-        events::announce_change(
-            recorder,
-            &obj.object_ref(&()),
-            ReasonCode::Created,
-            events::RECONCILE,
-            &format!("created in Angos as {id}"),
-        )
-        .await;
-    }
     Ok(())
 }
 
@@ -243,14 +208,14 @@ mod tests {
 
     #[test]
     fn errors_map_to_a_reason_and_an_action() {
-        let unreachable = || Error::Cleanup(Failure::new(ReasonCode::InstanceUnreachable, "x"));
+        let in_use = || Error::Cleanup(Failure::new(ReasonCode::InstanceInUse, "x"));
         assert_eq!(
-            unreachable().reason(),
-            (ReasonCode::InstanceUnreachable, events::CLEANUP)
+            in_use().reason(),
+            (ReasonCode::InstanceInUse, events::CLEANUP)
         );
         assert_eq!(
-            Error::Finalizer(Box::new(Finalizer::CleanupFailed(unreachable()))).reason(),
-            (ReasonCode::InstanceUnreachable, events::CLEANUP)
+            Error::Finalizer(Box::new(Finalizer::CleanupFailed(in_use()))).reason(),
+            (ReasonCode::InstanceInUse, events::CLEANUP)
         );
         assert_eq!(
             Error::Finalizer(Box::new(Finalizer::UnnamedObject)).reason(),

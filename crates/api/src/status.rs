@@ -10,17 +10,19 @@ pub struct Status {
     /// The `metadata.generation` the last successful reconcile applied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observed_generation: Option<i64>,
-    /// Identifier of the remote object, as Angos returned it. Its
-    /// presence means this CR created (and owns) that object: the
-    /// finalizer only deletes what is recorded here.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub remote_id: Option<String>,
     /// The instance this object was resolved to and stays bound to: a
     /// `spec.instanceRef` by name only never silently moves to another
     /// instance created later under the same name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instance: Option<BoundInstance>,
-    /// `Ready`, carrying one of the operator's reason codes.
+    /// `Ready` and the advisories, carrying one of the operator's reason
+    /// codes.
     #[serde(default)]
     pub conditions: Vec<Condition>,
+    /// The Angos tag the instance's ready pods run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Where the instance answers in the cluster: `<service>.<namespace>.svc:<port>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
 }

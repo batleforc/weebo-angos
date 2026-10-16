@@ -29,12 +29,12 @@ testkit = { path = "crates/testkit" }
 # Shared operator kit. To iterate on it locally, temporarily swap the
 # `git`/`tag` pair for `path = "../weebo-operator-kit/crates/<crate>"` —
 # never push with a path dependency (CI and container builds don't see it).
-weebo-kit-domain = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.16.0" }
-weebo-kit-api = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.16.0" }
-weebo-kit-application = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.16.0" }
-weebo-kit-adapters = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.16.0" }
-weebo-kit-runtime = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.16.0" }
-weebo-kit-testkit = { git = "https://github.com/batleforc/weebo-operator-kit", tag = "v0.16.0" }
+weebo-kit-domain = { path = "../weebo-operator-kit/crates/weebo-kit-domain" }
+weebo-kit-api = { path = "../weebo-operator-kit/crates/weebo-kit-api" }
+weebo-kit-application = { path = "../weebo-operator-kit/crates/weebo-kit-application" }
+weebo-kit-adapters = { path = "../weebo-operator-kit/crates/weebo-kit-adapters" }
+weebo-kit-runtime = { path = "../weebo-operator-kit/crates/weebo-kit-runtime" }
+weebo-kit-testkit = { path = "../weebo-operator-kit/crates/weebo-kit-testkit" }
 
 # Same versions as the kit: a mismatch would link two copies of
 # `kube`/`k8s-openapi` and the types wouldn't line up.
@@ -57,7 +57,6 @@ clap = { version = "4", features = ["derive", "env"] }
 async-trait = "0.1"
 uuid = { version = "1", features = ["v4"] }
 futures = "0.3"
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
 
 # Debug info on test binaries balloons target/ across this many crates
 # (envtest alone links kube-apiserver/etcd); CI runners have run out of

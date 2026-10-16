@@ -556,27 +556,6 @@
                 }
               }
             },
-            "angos": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "to": {
-                    "type": "array",
-                    "items": {
-                      "type": "object"
-                    }
-                  },
-                  "ports": {
-                    "type": "array",
-                    "items": {
-                      "type": "object"
-                    }
-                  }
-                },
-                "additionalProperties": false
-              }
-            },
             "vault": {
               "type": "array",
               "items": {
@@ -718,6 +697,33 @@
         "json"
       ],
       "description": "Log line format (LOG_FORMAT)."
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "type": "string"
+        },
+        "reloadLogBytes": {
+          "type": "integer",
+          "minimum": 1024
+        }
+      }
+    },
+    "managedInstances": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowedImages": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
     }
   }
 }

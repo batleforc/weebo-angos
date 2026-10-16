@@ -1,0 +1,6 @@
+dependencies:
+- name: weebo-operator-lib
+  repository: oci://ghcr.io/batleforc/charts
+  version: 0.16.0
+digest: sha256:22d806b48ee85e8ea26ac2cac432e509293807d75264af9463642f2657318340
+generated: "2026-10-16T04:35:43.545445022+02:00"

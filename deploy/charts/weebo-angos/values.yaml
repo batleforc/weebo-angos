@@ -299,9 +299,6 @@ networkPolicy:
           protocol: TCP
         - port: 6443
           protocol: TCP
-    # -- Egress rules (`to` + `ports`) to every Angos a
-    # AngosInstance points at.
-    angos: []
     # -- Egress rules to Vault, when a secretStore uses it.
     vault: []
     # -- Any other egress rule (OTLP collector, ...).
@@ -310,3 +307,18 @@ networkPolicy:
 # -- Extra environment variables, e.g. OTEL_EXPORTER_OTLP_ENDPOINT or
 # RUST_LOG.
 extraEnv: []
+
+# -- What the operator gives an instance that sets nothing.
+defaults:
+  # -- The Angos image of an instance without `image` (`repository:tag`);
+  # empty: the version the operator targets.
+  image: ""
+  # -- At most this many bytes of a pod's log are read to confirm a reload.
+  reloadLogBytes: 1048576
+
+managedInstances:
+  # -- The image repositories an instance may run. Creating an instance
+  # runs a pod with the namespace's labelled Secrets: keep this list to
+  # Angos's own image (or your mirror of it).
+  allowedImages:
+    - ghcr.io/project-angos/angos
