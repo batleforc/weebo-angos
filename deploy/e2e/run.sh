@@ -188,7 +188,7 @@ printf '%s' "$message" | grep -q nonzero || fail "rejection message: $message"
 [ "$(kubectl -n team-a get secret registry-config -o jsonpath='{.data.config\.toml}')" = "$accepted" ] \
   || fail "the refused configuration was left in registry-config"
 # A pod that restarts now starts, on the accepted configuration.
-kubectl -n team-a delete pod "$first_pod" --wait=false
+kubectl -n team-a delete pod "$first_pod" --timeout="$WAIT"
 kubectl -n team-a wait pods -l app.kubernetes.io/instance=registry --for=condition=Ready --timeout="$WAIT"
 reason_is registry ConfigRejected
 kubectl -n team-a patch angoslocalinstance registry --type json -p '[{"op":"remove","path":"/spec/extraConfig"}]'
