@@ -1,47 +1,46 @@
 # weebo-angos
 
-Kubernetes operator managing Angos objects as CRDs, built on
+Kubernetes operator running [Angos](https://github.com/project-angos/angos)
+OCI registries, built on
 [weebo-operator-kit](https://github.com/batleforc/weebo-operator-kit).
+Angos has no administration API: the operator renders its configuration,
+runs its workload, and reads what the pods did with it in their logs.
 
-| Kind                | Scope      | What it does                                                       |
-| ------------------- | ---------- | ------------------------------------------------------------------ |
-| `AngosInstance` | Cluster    | A Angos to drive: its URL and API token (`tokenSecretRef`) |
-| `AngosObject`   | Namespaced | An object of that Angos, created, updated and deleted with the CR |
+| Kind                 | Short | What it does                                                              |
+| -------------------- | ----- | ------------------------------------------------------------------------- |
+| `AngosLocalInstance` | `ali` | An Angos registry in a namespace: its workload and configuration          |
+
+Coming next (milestones M1–M5): the workload and both configuration
+layers of an instance, `AngosRepository` (`arepo`), `AngosIdentity`
+(`aid`), `AngosMaintenance` (`amaint`).
+
+Targets Angos **1.12.3** (`api::angos`): the configuration model
+(`domain::config`), the rules Angos checks it with
+(`domain::validation`, each citing Angos's code) and the startup keys are
+those of that version; moving to another Angos release is a release of
+the operator.
 
 ## Layout
 
 Hexagonal, one crate per layer, same rules as every weebo operator:
 
-| Crate               | Holds                                                                    |
-| ------------------- | ------------------------------------------------------------------------ |
-| `domain`            | the reason codes (`reason_codes!`), no dependency                        |
-| `api`               | the CRD types (`#[derive(CustomResource)]`), the kit's shared field types |
-| `application`       | ports (`RemoteGateway`, `GatewayFactory`) and the `reconcile_*` use cases |
-| `adapters-outbound` | the Angos HTTP gateway — **the placeholder to replace with the real client** — and its factory |
-| `adapters-inbound`  | the controllers and the webhook router (health routes only for now)       |
-| `operator`          | the binary: telemetry, leader election, webhook server, controllers      |
-| `crdgen`            | writes `deploy/crd/` from `api`                                           |
-| `testkit`           | envtest and fakes for the integration tests                               |
+| Crate               | Holds                                                                         |
+| ------------------- | ----------------------------------------------------------------------------- |
+| `domain`            | the reason codes, Angos's configuration model, its two layers and validation |
+| `api`               | the CRD types (`#[derive(CustomResource)]`), the kit's shared field types      |
+| `application`       | ports (the kit's `OwnedObjects`, `PodLogs`, `InstanceDirectory`), use cases    |
+| `adapters-outbound` | the instance directory (the kit's `LocalInstances`), the workload settings    |
+| `adapters-inbound`  | the controllers and the webhook router                                         |
+| `operator`          | the binary: telemetry, leader election, webhook server, controllers           |
+| `crdgen`            | writes `deploy/crd/` from `api`                                                |
+| `testkit`           | envtest and fakes for the integration tests                                    |
 
 `deploy/charts/weebo-angos` is a thin chart on the kit's library
 chart: `templates/_params.tpl` holds what is the operator's own (group,
-kinds, env, egress), `values.yaml` follows the kit's values contract.
-
-## First steps
-
-The project is licensed `Apache-2.0` (`Cargo.toml`, the image's labels):
-add the matching `LICENSE.md`.
-
-```bash
-task init     # toolchain (mise) and mise.lock — commit it, cog.toml from the kit, git hooks
-task doctor   # envtest prerequisites
-task recu     # CRDs (crdgen) and their copies in the chart
-task test:all # unit, contract and envtest tests — creates Cargo.lock: commit it
-```
-
-Then replace the placeholder REST shape of
-`crates/adapters-outbound/src/http_gateway.rs` with the real
-Angos API, and grow `AngosObject` into the real kinds.
+kinds, the namespaced rules of an instance's objects, `pods/log`, env),
+`values.yaml` follows the kit's values contract plus `defaults` and
+`managedInstances.allowedImages`. Creating an instance runs an Angos pod
+with the namespace's Secrets labelled `angos.weebo.io/credential: "true"`.
 
 ## Tasks
 

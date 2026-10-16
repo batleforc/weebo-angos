@@ -57,6 +57,11 @@ clap = { version = "4", features = ["derive", "env"] }
 async-trait = "0.1"
 uuid = { version = "1", features = ["v4"] }
 futures = "0.3"
+# The configuration model of Angos and its validation (domain).
+toml = "1"
+regex = "1"
+base64 = "0.22"
+url = "2"
 
 # Debug info on test binaries balloons target/ across this many crates
 # (envtest alone links kube-apiserver/etcd); CI runners have run out of
