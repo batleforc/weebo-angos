@@ -17,6 +17,7 @@ use kube::api::Api;
 use kube::runtime::controller::Action;
 use kube::runtime::finalizer::{Event as Finalizer, finalizer};
 use kube::runtime::reflector::ObjectRef;
+use kube::runtime::{WatchStreamExt, watcher};
 use kube::{Client, Resource, ResourceExt};
 use weebo_kit_runtime::events;
 use weebo_kit_runtime::status::StatusUpdate;
@@ -28,9 +29,22 @@ const KIND: &str = "AngosIdentity";
 pub async fn run(client: Client, ctx: Arc<Ctx>) {
     let health = ctx.health.clone();
     let results = super::controller(ctx.scope.api::<Identity>(client.clone()), &ctx.scope)
-        .watches(
-            ctx.scope.api::<LocalInstance>(client),
-            ctx.scope.watcher_config(),
+        // Only when what the instance made of its identities changes: its
+        // other status writes (a reload being confirmed…) would wake them
+        // all for nothing.
+        .watches_stream(
+            watcher(
+                ctx.scope.api::<LocalInstance>(client),
+                ctx.scope.watcher_config(),
+            )
+            .default_backoff()
+            .touched_objects()
+            .predicate_filter(
+                |instance: &LocalInstance| {
+                    super::hash_of(&instance.status.as_ref().map(|s| &s.identities))
+                },
+                Default::default(),
+            ),
             |instance| {
                 instance
                     .status
@@ -142,5 +156,5 @@ async fn apply(api: &Api<Identity>, identity: &Identity, ctx: &Ctx) -> Result<Ac
         )
         .await;
     }
-    Ok(super::requeue_after(&report.outcome))
+    Ok(super::requeue_waiting(&report.outcome))
 }
