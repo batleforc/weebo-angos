@@ -67,6 +67,24 @@ impl Credentials for FakeCredentials {
         })
     }
 
+    async fn read_all(
+        &self,
+        namespace: &str,
+        name: &str,
+    ) -> Result<BTreeMap<String, String>, CredentialError> {
+        let secrets = self.secrets.lock().unwrap();
+        match secrets.get(&format!("{namespace}/{name}")) {
+            None => Err(CredentialError::Missing(format!(
+                "secret {namespace}/{name} not found"
+            ))),
+            Some((false, _)) => Err(CredentialError::NotAllowed(format!(
+                "secret {namespace}/{name} lacks the label {}",
+                api::CREDENTIAL_LABEL
+            ))),
+            Some((true, data)) => Ok(data.clone()),
+        }
+    }
+
     async fn consents(&self, namespace: &str, name: &str) -> Result<Option<bool>, CredentialError> {
         Ok(self
             .secrets
