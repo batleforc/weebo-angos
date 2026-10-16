@@ -23,6 +23,41 @@ impl KubeCredentials {
 
 #[async_trait::async_trait]
 impl Credentials for KubeCredentials {
+    async fn read_all(
+        &self,
+        namespace: &str,
+        name: &str,
+    ) -> Result<std::collections::BTreeMap<String, String>, CredentialError> {
+        let api: Api<Secret> = Api::namespaced(self.client.clone(), namespace);
+        let secret = api
+            .get_opt(name)
+            .await
+            .map_err(|e| CredentialError::Kubernetes(format!("secret {namespace}/{name}: {e}")))?
+            .ok_or_else(|| {
+                CredentialError::Missing(format!("secret {namespace}/{name} not found"))
+            })?;
+        if secret
+            .labels()
+            .get(api::CREDENTIAL_LABEL)
+            .map(String::as_str)
+            != Some("true")
+        {
+            return Err(CredentialError::NotAllowed(
+                weebo_kit_application::pod_safety::secret_not_labelled(
+                    namespace,
+                    name,
+                    api::CREDENTIAL_LABEL,
+                ),
+            ));
+        }
+        Ok(secret
+            .data
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(k, v)| Some((k, String::from_utf8(v.0).ok()?)))
+            .collect())
+    }
+
     async fn read(
         &self,
         namespace: &str,

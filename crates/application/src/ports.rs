@@ -69,6 +69,13 @@ pub trait Credentials: Send + Sync {
     /// The UTF-8 value of `key` of the Secret `name` of `namespace`.
     async fn read(&self, namespace: &str, name: &str, key: &str)
     -> Result<String, CredentialError>;
+    /// Every key of the Secret `name` of `namespace`, read at once (keys
+    /// that belong together never come from two versions of it).
+    async fn read_all(
+        &self,
+        namespace: &str,
+        name: &str,
+    ) -> Result<std::collections::BTreeMap<String, String>, CredentialError>;
     /// Whether the Secret `name` of `namespace` carries the label (`None`:
     /// it doesn't exist).
     async fn consents(&self, namespace: &str, name: &str) -> Result<Option<bool>, CredentialError>;

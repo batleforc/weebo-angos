@@ -72,20 +72,25 @@ pub fn conflicts(
     lost
 }
 
-/// An identity's hash and version, from its own Secret.
+/// An identity's hash and version, from its own Secret read once: a
+/// rotation between two reads would pair the old hash with the new version
+/// (and the instance would confirm a version it doesn't run).
 pub async fn hash_of(
     view: &IdentityView,
     credentials: &dyn Credentials,
 ) -> Result<(String, u64), CredentialError> {
     let secret = password_secret(&view.name);
-    let hash = credentials
-        .read(&view.namespace, &secret, keys::HASH)
-        .await?;
-    let version = credentials
-        .read(&view.namespace, &secret, keys::VERSION)
-        .await?
-        .trim()
-        .parse()
+    let data = credentials.read_all(&view.namespace, &secret).await?;
+    let hash = data.get(keys::HASH).cloned().ok_or_else(|| {
+        CredentialError::Missing(format!(
+            "secret {}/{secret} has no key {:?}",
+            view.namespace,
+            keys::HASH
+        ))
+    })?;
+    let version = data
+        .get(keys::VERSION)
+        .and_then(|v| v.trim().parse().ok())
         .unwrap_or(1);
     Ok((hash, version))
 }
