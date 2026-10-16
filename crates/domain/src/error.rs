@@ -45,6 +45,11 @@ weebo_kit_domain::reason_codes! {
         /// the new startup layer waits for the annotation
         /// `angos.weebo.io/confirm-storage` set to `status.pendingBootHash`.
         StorageChangePending,
+        /// A change that rolls the pods (a startup key, the image) waits:
+        /// they share a single-writer volume, so they are recreated — an
+        /// outage. The annotation `angos.weebo.io/allow-disruptive-update:
+        /// "true"` lets it through.
+        DisruptiveUpdatePending,
         /// The instance's pods aren't ready on the desired startup layer
         /// yet (rolling out, or not scheduled).
         WorkloadNotReady,
@@ -161,6 +166,7 @@ impl ReasonCode {
         match self {
             ReasonCode::Reconciled
             | ReasonCode::StorageChangePending
+            | ReasonCode::DisruptiveUpdatePending
             | ReasonCode::ReloadUnconfirmed
             | ReasonCode::MaintenanceSkipped
             | ReasonCode::MaintenanceDeferred

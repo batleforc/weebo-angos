@@ -95,6 +95,12 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
         &[api::angos::IMAGE_REPOSITORY],
     );
     tracing::info!(?allowed_images, default_image = %settings.default_image, "instances");
+    let credentials: Arc<KubeCredentials> = Arc::new(KubeCredentials::new(client.clone()));
+    let admission = Arc::new(adapters_inbound::admission::AngosAdmission {
+        credentials: credentials.clone(),
+        allowed_images: allowed_images.clone(),
+        default_image: settings.default_image.clone(),
+    });
     let ctx = Arc::new(Ctx {
         client: client.clone(),
         instances,
@@ -103,7 +109,7 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
             adapters_outbound::workload_settings(allowed_images),
         )),
         logs: Arc::new(KubePodLogs::new(client.clone())),
-        credentials: Arc::new(KubeCredentials::new(client.clone())),
+        credentials,
         issuer: Arc::new(KubeClusterIssuer::new(client.clone())),
         keys: Arc::new(RandomKeys),
         settings,
@@ -125,7 +131,7 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     // failover into an outage. On shutdown it keeps answering while
     // endpoints drain.
     let server = webhook_server::spawn(
-        webhook::router(health.clone(), scope),
+        webhook::router(health.clone(), scope, admission),
         health,
         shutdown.clone(),
     )

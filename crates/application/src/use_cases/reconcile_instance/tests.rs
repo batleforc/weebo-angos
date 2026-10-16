@@ -600,3 +600,25 @@ async fn status_fields_clear_what_a_pass_unset() {
     assert_eq!(fields["pods"], json!([]));
     assert!(!fields.contains_key("conditions"));
 }
+
+#[tokio::test]
+async fn pods_on_a_single_writer_volume_roll_only_with_consent() {
+    let mut world = World::new(json!({"storage": {"fs": {"volume": {"size": "1Gi"}}}}));
+    running(&mut world).await;
+    let first = world.template_boot_hash().await;
+    world.spec.server.port = 9000;
+    let held = world.pass().await;
+    assert_eq!(reason(&held), ReasonCode::Reconciled);
+    assert!(advisories(&held).contains(&ReasonCode::DisruptiveUpdatePending));
+    assert_eq!(world.template_boot_hash().await, first);
+    // A hot change still goes through.
+    world.spec.global.gc_grace_secs = Some(600);
+    world.pass().await;
+    assert!(world.hot().contains("gc_grace_secs = 600"));
+    world.annotations.insert(
+        api::ANNOTATIONS.key(weebo_kit_api_annotations::ALLOW_DISRUPTIVE_UPDATE),
+        "true".into(),
+    );
+    world.pass().await;
+    assert_ne!(world.template_boot_hash().await, first);
+}

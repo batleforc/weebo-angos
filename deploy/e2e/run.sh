@@ -215,6 +215,41 @@ done
 reason_is registry Reconciled
 [ -z "$(field '{.status.pendingBootHash}')" ] || fail "pendingBootHash left after the roll"
 
+step "an S3 store, TLS and the cluster's tokens on a second instance"
+kubectl apply -f "$HERE/secure.yaml"
+kubectl -n team-a wait --for=condition=complete job/rustfs-bucket --timeout="$WAIT"
+kubectl -n team-a wait --for=condition=Ready certificate/secure-tls --timeout="$WAIT"
+for _ in $(seq 1 90); do
+  got="$(kubectl -n team-a get angoslocalinstance secure \
+    -o jsonpath='{.status.conditions[?(@.type=="Ready")].reason}' 2>/dev/null || true)"
+  [ "$got" = Reconciled ] && break
+  sleep 2
+done
+[ "$got" = Reconciled ] || fail "secure: Ready reason is ${got:-<none>}, expected Reconciled"
+# Served over TLS (self-signed: not verified here).
+kubectl -n team-a run tls-probe --rm -i --restart=Never --quiet \
+  --image=docker.io/curlimages/curl:8.17.0 -- -skf -o /dev/null -w '%{http_code}\n' \
+  https://secure.team-a.svc:8000/readyz | grep -q 200 || fail "secure: /readyz over TLS"
+# The generated token key and the cluster's issuer reached the file.
+kubectl -n team-a get secret secure-token-key -o name >/dev/null || fail "secure: no generated token key"
+kubectl -n team-a get secret secure-config -o jsonpath='{.data.config\.toml}' | base64 -d \
+  | grep -q 'bearer_token_file = "/var/run/secrets/angos/kube/token"' \
+  || fail "secure: auth.kubernetes not rendered"
+
+step "the webhook refuses what the operator wouldn't run"
+if kubectl apply -f - 2>/dev/null <<'YAML'
+apiVersion: angos.weebo.io/v1alpha1
+kind: AngosLocalInstance
+metadata:
+  name: refused
+  namespace: team-a
+spec:
+  image: { repository: docker.io/library/busybox }
+  storage:
+    fs: {}
+YAML
+then fail "an instance on a foreign image was admitted"; fi
+
 step "the CRD refuses a name that can't name a Service"
 if kubectl apply -f - 2>/dev/null <<'YAML'
 apiVersion: angos.weebo.io/v1alpha1
