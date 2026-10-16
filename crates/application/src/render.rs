@@ -113,6 +113,9 @@ pub struct Resolved {
     /// `global.access` compiled and checked (between the operator's own
     /// rules and the last one).
     pub global_rules: Vec<String>,
+    /// `global.access.admin` compiled: also rendered into every
+    /// repository's policy, which Angos checks after the global one.
+    pub admin_rule: Option<String>,
     /// `global.retention`, checked.
     pub retention: Option<domain::config::RetentionPolicy>,
     /// `global.index`, checked.
@@ -484,6 +487,20 @@ pub fn model(spec: &LocalInstanceSpec, resolved: &Resolved) -> AngosConfig {
     });
 
     config.repository = resolved.repositories.clone();
+    if let Some(admin) = &resolved.admin_rule {
+        // Angos checks a repository's policy after the global one: `admin`
+        // means anything only if every repository grants it too.
+        for repository in config.repository.values_mut() {
+            repository
+                .access_policy
+                .get_or_insert_with(|| Policy {
+                    default: Some(AccessMode::Deny),
+                    rules: Vec::new(),
+                })
+                .rules
+                .insert(0, admin.clone());
+        }
+    }
     for (username, hash) in &resolved.identities {
         config.auth.identity.insert(
             username.clone(),
@@ -704,6 +721,43 @@ mod tests {
         no_scan.scan = None;
         let refused = render(&no_scan, &resolved).unwrap_err();
         assert!(refused.to_string().contains("scan queue"), "{refused}");
+    }
+
+    #[test]
+    fn the_admins_are_granted_in_every_repository_too() {
+        let mut resolved = Resolved {
+            admin_rule: Some("identity.username == \"root\"".into()),
+            ..Default::default()
+        };
+        resolved.repositories.insert(
+            "team".into(),
+            domain::config::Repository {
+                access_policy: Some(Policy {
+                    default: Some(AccessMode::Deny),
+                    rules: vec!["request.action == \"list-tags\"".into()],
+                }),
+                ..Default::default()
+            },
+        );
+        resolved
+            .repositories
+            .insert("open".into(), domain::config::Repository::default());
+        let config = model(&fs(), &resolved);
+        let rules = |prefix: &str| {
+            config.repository[prefix]
+                .access_policy
+                .clone()
+                .unwrap()
+                .rules
+        };
+        assert_eq!(
+            rules("team"),
+            [
+                "identity.username == \"root\"",
+                "request.action == \"list-tags\""
+            ]
+        );
+        assert_eq!(rules("open"), ["identity.username == \"root\""]);
     }
 
     #[test]

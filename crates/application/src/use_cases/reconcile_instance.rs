@@ -341,6 +341,7 @@ async fn policies(
     let global = rules::global_access(&spec.global.access, kube, ports.cel).map_err(invalid)?;
     warnings.extend(global.warnings);
     resolved.global_rules = global.rules;
+    resolved.admin_rule = rules::admin_rule(&spec.global.access, kube);
     if let Some(retention) = &spec.global.retention {
         let checked =
             rules::image_rules("spec.global.retention.rules", &retention.rules, ports.cel)

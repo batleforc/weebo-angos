@@ -590,8 +590,9 @@ spec:
                     properties:
                       admin:
                         description: |-
-                          Who may do anything: named identities, groups or ServiceAccounts
-                          only.
+                          Who may do anything, in every repository too (the rule is added to
+                          each repository's policy): named identities, groups or
+                          ServiceAccounts only.
                         items:
                           type: string
                         type: array

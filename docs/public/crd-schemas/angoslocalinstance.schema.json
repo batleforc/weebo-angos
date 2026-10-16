@@ -659,7 +659,7 @@
           "description": "The global access policy, checked before any repository's.",
           "properties": {
             "admin": {
-              "description": "Who may do anything: named identities, groups or ServiceAccounts\nonly.",
+              "description": "Who may do anything, in every repository too (the rule is added to\neach repository's policy): named identities, groups or\nServiceAccounts only.",
               "items": {
                 "type": "string"
               },

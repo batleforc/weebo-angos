@@ -156,6 +156,19 @@ pub fn global_access(
     }
 }
 
+/// The rule of `global.access.admin` alone (its subjects read, `None`
+/// without any or when one doesn't read — `global_access` reports it).
+pub fn admin_rule(access: &GlobalAccess, kube: Kube<'_>) -> Option<String> {
+    let subjects = access::subjects(
+        "spec.global.access.admin",
+        VERB_ADMIN,
+        &access.admin,
+        kube.is_some(),
+    )
+    .ok()?;
+    grant(VERB_ADMIN, &subjects, kube.unwrap_or("kube"))
+}
+
 /// Image rules (retention, index), checked.
 pub fn image_rules(
     field: &str,
