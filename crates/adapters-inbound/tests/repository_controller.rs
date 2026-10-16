@@ -81,9 +81,13 @@ async fn repositories_are_rendered_into_their_instance() {
     )
     .await
     .unwrap();
-    // Bound and rendered; never confirmed without pods.
-    reason_is(&team, "team", "ConfigPropagating").await;
-    let bound = team.get("team").await.unwrap().status.unwrap();
+    // Bound and rendered; never confirmed without pods. (`ConfigPropagating`
+    // also says "waiting for the instance to render it": wait for both.)
+    let bound = testkit::polling::wait_for(&team, "team", TIMEOUT, POLL, |r| {
+        let status = r.status.clone()?;
+        (status.rendered && reason(r).as_deref() == Some("ConfigPropagating")).then_some(status)
+    })
+    .await;
     assert!(bound.rendered);
     assert_eq!(bound.common.instance.unwrap().name, "reg");
     let hot = Api::<Secret>::namespaced(client.clone(), "team")
