@@ -49,6 +49,10 @@ dump() {
   kubectl -n "$OPERATOR_NS" logs -l app.kubernetes.io/name=weebo-angos --tail=200 --prefix --all-containers
   kubectl -n team-a get angoslocalinstances,angosrepositories,angosidentities,angosmaintenances -o yaml
   kubectl -n team-a get jobs,pods -o wide
+  kubectl -n team-a logs deploy/registry --timestamps --tail=400 | grep -v 'readyz\|healthz' | tail -40
+  kubectl -n team-a get secret registry-config -o jsonpath='{.data.config\.toml}' | base64 -d | grep -A3 'auth.identity'
+  kubectl -n team-a get secret ci-angos-password -o jsonpath='{.data.version}' | base64 -d; echo
+  kubectl -n weebo-angos-system logs -l app.kubernetes.io/name=weebo-angos --tail=400 | grep -i 'identit\|ci\b' | tail -20
   kubectl get events -A --sort-by=.lastTimestamp | tail -n 50
 }
 # dump turns errexit off: leave right after it.
