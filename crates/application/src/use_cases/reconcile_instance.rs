@@ -213,6 +213,29 @@ async fn resolve(
             )
         })?);
     }
+    if let Some(r) = spec.scan.as_ref().and_then(|s| s.token_secret_ref.as_ref()) {
+        resolved.scan_token = Some(read(r.name.clone(), r.key.clone()).await?);
+    }
+    for webhook in &spec.event_webhooks {
+        let r = &webhook.token_secret_ref;
+        resolved.event_tokens.insert(
+            webhook.name.clone(),
+            read(r.name.clone(), r.key.clone()).await?,
+        );
+    }
+    for webhook in &spec.auth.webhooks {
+        let mut auth = render::WebhookAuth::default();
+        if let Some(r) = &webhook.bearer_token_secret_ref {
+            auth.bearer_token = Some(read(r.name.clone(), r.key.clone()).await?);
+        }
+        if let Some(r) = &webhook.basic_auth_secret_ref {
+            auth.basic = Some((
+                read(r.name.clone(), r.username_key.clone()).await?,
+                read(r.name.clone(), r.password_key.clone()).await?,
+            ));
+        }
+        resolved.webhook_auth.insert(webhook.name.clone(), auth);
+    }
     if let Some(ts) = &spec.auth.token_service {
         resolved.token_key = Some(match &ts.key_secret_ref {
             Some(r) => read(r.name.clone(), r.key.clone()).await?,
@@ -325,6 +348,13 @@ async fn policies(
         warnings.extend(more);
         resolved.index = Some(policy);
     }
+    if let Some(scan) = &spec.scan {
+        let (policy, more) = rules::scan_policy("spec.scan", scan.default, &scan.rules, ports.cel)
+            .map_err(invalid)?;
+        warnings.extend(more);
+        resolved.scan = Some(policy);
+    }
+    let references = crate::repositories::InstanceReferences::of(spec);
     let views = ports
         .repositories
         .bound_to(pass.owner, &spec.repository_selector)
@@ -357,7 +387,9 @@ async fn policies(
                 view.spec.prefix
             ));
         } else {
-            match crate::repositories::render(view, kube, ports.cel, ports.credentials).await {
+            match crate::repositories::render(view, kube, &references, ports.cel, ports.credentials)
+                .await
+            {
                 Ok((table, more)) => {
                     warnings.extend(more.into_iter().map(|w| format!("{key}: {w}")));
                     resolved
@@ -769,6 +801,17 @@ async fn run(
         advisories.push(advisory(
             ReasonCode::ExtraConfigUsed,
             "spec.extraConfig is rendered: what it sets is checked by Angos only",
+        ));
+    }
+    if let Some(webhook) = spec.auth.webhooks.iter().find(|w| w.default) {
+        advisories.push(advisory(
+            ReasonCode::DefaultAuthorizationWebhook,
+            format!(
+                "the authorization webhook {} decides every request without a repository's own, \
+                 /readyz and /healthz included, and fails closed: while it is unreachable the \
+                 pods are not ready",
+                webhook.name
+            ),
         ));
     }
     if spec.auth.kubernetes.is_some() {

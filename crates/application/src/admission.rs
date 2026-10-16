@@ -51,6 +51,33 @@ pub fn placeholders(spec: &LocalInstanceSpec) -> Resolved {
             .collect(),
         ui_client_id: Some("placeholder".into()),
         cluster_issuer: Some("https://kubernetes.default.svc".into()),
+        scan_token: spec
+            .scan
+            .as_ref()
+            .and_then(|s| s.token_secret_ref.as_ref())
+            .map(|_| "placeholder".into()),
+        event_tokens: spec
+            .event_webhooks
+            .iter()
+            .map(|w| (w.name.clone(), "placeholder".to_string()))
+            .collect(),
+        webhook_auth: spec
+            .auth
+            .webhooks
+            .iter()
+            .map(|w| {
+                (
+                    w.name.clone(),
+                    render::WebhookAuth {
+                        bearer_token: w
+                            .bearer_token_secret_ref
+                            .as_ref()
+                            .map(|_| "placeholder".into()),
+                        basic: w.basic_auth_secret_ref.as_ref().and_then(|_| pair()),
+                    },
+                )
+            })
+            .collect(),
         ..Default::default()
     }
 }
@@ -102,6 +129,20 @@ pub fn referenced_secrets(
     {
         add(&r.name);
     }
+    if let Some(r) = spec.scan.as_ref().and_then(|s| s.token_secret_ref.as_ref()) {
+        add(&r.name);
+    }
+    for webhook in &spec.event_webhooks {
+        add(&webhook.token_secret_ref.name);
+    }
+    for webhook in &spec.auth.webhooks {
+        if let Some(r) = &webhook.bearer_token_secret_ref {
+            add(&r.name);
+        }
+        if let Some(r) = &webhook.basic_auth_secret_ref {
+            add(&r.name);
+        }
+    }
     secrets
 }
 
@@ -128,6 +169,13 @@ pub fn check_instance(
     }
     if let Some(index) = &spec.global.index {
         rules::index_policy("spec.global.index", index, checker).map_err(invalid)?;
+    }
+    if let Some(scan) = &spec.scan {
+        resolved.scan = Some(
+            rules::scan_policy("spec.scan", scan.default, &scan.rules, checker)
+                .map_err(invalid)?
+                .0,
+        );
     }
     render::render(spec, &resolved).map_err(|e| {
         Failure::new(

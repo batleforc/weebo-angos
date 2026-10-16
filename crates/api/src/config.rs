@@ -510,6 +510,184 @@ pub struct Auth {
     /// `/token`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_service: Option<TokenService>,
+    /// `[auth.webhook.<name>]`: HTTP services asked whether a request is
+    /// allowed (after the access policies). One may be the instance's
+    /// `default` (`global.authorization_webhook`): it then decides every
+    /// request — the probes included — and **fails closed**.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(extend("x-kubernetes-validations" = [
+        {"rule": "self.filter(w, w.default).size() <= 1", "message": "at most one authorization webhook is the default"},
+        {"rule": "self.all(w, self.exists_one(o, o.name == w.name))", "message": "authorization webhook names are unique"}
+    ]))]
+    #[schemars(length(max = 32))]
+    pub webhooks: Vec<AuthWebhook>,
+}
+
+/// A client's TLS towards a service: the CA its certificate is checked
+/// with (beside the public roots) and the certificate presented. Mounted in
+/// the pods: a change rolls them.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientTls {
+    /// A PEM bundle (`server_ca_bundle`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ca: Option<CaBundle>,
+    /// A `kubernetes.io/tls` Secret (`tls.crt`, `tls.key`) labelled
+    /// `angos.weebo.io/credential: "true"`, presented for mTLS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_certificate_secret_name: Option<String>,
+}
+
+/// A CA bundle in a ConfigMap or a Secret of the namespace (a Secret
+/// labelled `angos.weebo.io/credential: "true"`).
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(extend("x-kubernetes-validations" = [
+    {"rule": "has(self.configMapKeyRef) != has(self.secretKeyRef)", "message": "a CA bundle is in a ConfigMap or a Secret"}
+]))]
+pub struct CaBundle {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_map_key_ref: Option<KeyRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_key_ref: Option<LocalSecretKeyRef>,
+}
+
+/// A key of a ConfigMap of the namespace.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyRef {
+    pub name: String,
+    pub key: String,
+}
+
+/// `[auth.webhook.<name>]`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(extend("x-kubernetes-validations" = [
+    {"rule": "!(has(self.bearerTokenSecretRef) && has(self.basicAuthSecretRef))", "message": "an authorization webhook authenticates with a bearer token or Basic credentials, not both"}
+]))]
+pub struct AuthWebhook {
+    /// The key repositories name it by (`authorizationWebhook`).
+    #[schemars(regex(pattern = r"^[A-Za-z0-9_-]+$"), length(min = 1, max = 63))]
+    pub name: String,
+    #[schemars(regex(pattern = r"^https?://"))]
+    pub url: String,
+    /// How long Angos waits for an answer (required by Angos).
+    #[schemars(range(min = 1))]
+    pub timeout_ms: u64,
+    /// A bearer token, from a Secret labelled
+    /// `angos.weebo.io/credential: "true"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bearer_token_secret_ref: Option<LocalSecretKeyRef>,
+    /// Basic credentials (`username`, `password` keys), from a Secret
+    /// labelled `angos.weebo.io/credential: "true"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub basic_auth_secret_ref: Option<crate::repository::BasicCredentials>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls: Option<ClientTls>,
+    /// Request headers forwarded to the webhook.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub forward_headers: Vec<String>,
+    /// `global.authorization_webhook`: asked for every request without a
+    /// repository's own.
+    #[serde(default)]
+    pub default: bool,
+}
+
+/// `[global.scan]`: the vulnerability scanner Angos sends pushed images
+/// to (deployed apart, e.g. `angos scanner trivy`), and which images it
+/// scans.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Scan {
+    /// The scanner's base URL (Angos posts to `<url>/scan`).
+    #[schemars(regex(pattern = r"^https?://"))]
+    pub url: String,
+    /// The scanner's token, from a Secret labelled
+    /// `angos.weebo.io/credential: "true"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_secret_ref: Option<LocalSecretKeyRef>,
+    /// Angos: 600.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub timeout_secs: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls: Option<ClientTls>,
+    /// What applies when no rule matches (unset: `Skip`); a matching rule
+    /// does the opposite. A repository's own `scan` replaces it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<ScanDefault>,
+    /// CEL rules on `image`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, JsonSchema)]
+pub enum ScanDefault {
+    Scan,
+    Skip,
+}
+
+/// `[event_webhook.<name>]`: an HTTP endpoint told of pushes, pulls and
+/// deletions.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EventWebhook {
+    /// The key repositories name it by (`eventWebhooks`).
+    #[schemars(regex(pattern = r"^[A-Za-z0-9_-]+$"), length(min = 1, max = 63))]
+    pub name: String,
+    #[schemars(regex(pattern = r"^https?://"))]
+    pub url: String,
+    /// `Required`: the request fails when the webhook does; `Optional`:
+    /// tried, never blocking; `Async`: sent in the background.
+    pub policy: DeliveryPolicy,
+    /// The bearer token Angos sends, from a Secret labelled
+    /// `angos.weebo.io/credential: "true"`.
+    pub token_secret_ref: LocalSecretKeyRef,
+    /// Angos: 5000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub timeout_ms: Option<u64>,
+    /// At most 16. Angos: 3 for `Required`, 0 otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(max = 16))]
+    pub max_retries: Option<u32>,
+    #[schemars(length(min = 1))]
+    pub events: Vec<EventKind>,
+    /// Regexes of the namespaces reported; empty: all.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub repository_filter: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls: Option<ClientTls>,
+    /// In `global.event_webhooks`: told of every repository without its
+    /// own list.
+    #[serde(default)]
+    pub default: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, JsonSchema)]
+pub enum DeliveryPolicy {
+    Required,
+    Optional,
+    Async,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, JsonSchema)]
+pub enum EventKind {
+    #[serde(rename = "manifest.push")]
+    ManifestPush,
+    #[serde(rename = "manifest.pull")]
+    ManifestPull,
+    #[serde(rename = "manifest.delete")]
+    ManifestDelete,
+    #[serde(rename = "blob.push")]
+    BlobPush,
+    #[serde(rename = "blob.pull")]
+    BlobPull,
+    #[serde(rename = "tag.create")]
+    TagCreate,
+    #[serde(rename = "tag.delete")]
+    TagDelete,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, JsonSchema)]
@@ -554,6 +732,10 @@ pub struct OidcProvider {
     pub http_request_timeout_secs: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jwks_refresh_timeout_secs: Option<u64>,
+    /// The CA the provider's certificate is checked with (beside the
+    /// public roots), and a client certificate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls: Option<ClientTls>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

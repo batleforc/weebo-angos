@@ -134,6 +134,10 @@ weebo_kit_domain::reason_codes! {
         /// The S3 credentials changed alone: the pods rolled without a
         /// confirmation.
         StorageCredentialsRotated,
+        /// An authorization webhook is the instance's default: it decides
+        /// every request, the probes included, and fails closed — a
+        /// webhook down takes the pods out of service.
+        DefaultAuthorizationWebhook,
         /// `auth.kubernetes` is used: the instance's account must be bound
         /// to `system:service-account-issuer-discovery` (gitops).
         IssuerDiscoveryNotBound,
@@ -187,6 +191,7 @@ impl ReasonCode {
             | ReasonCode::VolumeNotResized
             | ReasonCode::StorageCredentialsRotated
             | ReasonCode::IssuerDiscoveryNotBound
+            | ReasonCode::DefaultAuthorizationWebhook
             | ReasonCode::ConfigReloaded
             | ReasonCode::ConfigRolledOut
             | ReasonCode::TokenKeyRotated

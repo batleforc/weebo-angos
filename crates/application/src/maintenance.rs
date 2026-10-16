@@ -117,6 +117,10 @@ pub fn job(
         mount("hot", paths::HOT_DIR, true),
         mount("tmp", "/tmp", false),
     ];
+    if let Some((volume, mount)) = crate::workload::client_tls_volume(ispec) {
+        volumes.push(volume);
+        mounts.push(mount);
+    }
     let mut beside = false;
     for (volume, fs, created) in [
         ("data", ispec.storage.fs.as_ref(), names.data()),

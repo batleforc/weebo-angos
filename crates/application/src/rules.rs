@@ -198,6 +198,28 @@ pub fn index_policy(
     ))
 }
 
+/// A `scan` policy, its rules checked.
+pub fn scan_policy(
+    field: &str,
+    default: Option<api::config::ScanDefault>,
+    rules: &[String],
+    checker: &dyn CelChecker,
+) -> Result<(Policy<domain::config::ScanAction>, Vec<String>), Problems> {
+    use api::config::ScanDefault;
+    use domain::config::ScanAction;
+    let checked = image_rules(&format!("{field}.rules"), rules, checker)?;
+    Ok((
+        Policy {
+            default: default.map(|d| match d {
+                ScanDefault::Scan => ScanAction::Scan,
+                ScanDefault::Skip => ScanAction::Skip,
+            }),
+            rules: checked.rules,
+        },
+        checked.warnings,
+    ))
+}
+
 /// Subjects are read here too, for the webhook's messages.
 pub fn parse_subject(subject: &str) -> Result<Subject, String> {
     Subject::parse(subject).map_err(|e| e.0)

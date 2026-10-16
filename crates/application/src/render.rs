@@ -38,6 +38,59 @@ pub mod paths {
     pub const KUBE_DIR: &str = "/var/run/secrets/angos/kube";
     /// The default JWKS of the cluster's ServiceAccount tokens.
     pub const KUBE_JWKS: &str = "https://kubernetes.default.svc/openid/v1/jwks";
+    /// The client TLS of the services Angos calls, one directory per slot
+    /// (`<slot>/ca.crt`, `tls.crt`, `tls.key`).
+    pub const CLIENT_TLS_DIR: &str = "/etc/angos/client-tls";
+}
+
+/// A client TLS's files under [`paths::CLIENT_TLS_DIR`].
+pub mod tls_files {
+    pub const CA: &str = "ca.crt";
+    pub const CERTIFICATE: &str = "tls.crt";
+    pub const KEY: &str = "tls.key";
+}
+
+/// The client TLS of every service the spec calls, by slot: its directory
+/// under [`paths::CLIENT_TLS_DIR`].
+pub fn client_tls_slots(spec: &LocalInstanceSpec) -> Vec<(String, &api::config::ClientTls)> {
+    let mut out = Vec::new();
+    for provider in &spec.auth.oidc {
+        if let Some(tls) = &provider.tls {
+            out.push((format!("oidc-{}", provider.name), tls));
+        }
+    }
+    for webhook in &spec.auth.webhooks {
+        if let Some(tls) = &webhook.tls {
+            out.push((format!("webhook-{}", webhook.name), tls));
+        }
+    }
+    for webhook in &spec.event_webhooks {
+        if let Some(tls) = &webhook.tls {
+            out.push((format!("event-{}", webhook.name), tls));
+        }
+    }
+    if let Some(tls) = spec.scan.as_ref().and_then(|s| s.tls.as_ref()) {
+        out.push(("scan".into(), tls));
+    }
+    out
+}
+
+fn client_tls(slot: &str, tls: Option<&api::config::ClientTls>) -> ClientTls {
+    let Some(tls) = tls else {
+        return ClientTls::default();
+    };
+    let file = |name: &str| format!("{}/{slot}/{name}", paths::CLIENT_TLS_DIR);
+    ClientTls {
+        server_ca_bundle: tls.ca.as_ref().map(|_| file(tls_files::CA)),
+        client_certificate_bundle: tls
+            .client_certificate_secret_name
+            .as_ref()
+            .map(|_| file(tls_files::CERTIFICATE)),
+        client_private_key: tls
+            .client_certificate_secret_name
+            .as_ref()
+            .map(|_| file(tls_files::KEY)),
+    }
 }
 
 /// What the instance's Secrets hold and its rules compile to, resolved
@@ -68,6 +121,20 @@ pub struct Resolved {
     pub repositories: BTreeMap<String, domain::config::Repository>,
     /// The identities rendered: username → Argon2 PHC hash.
     pub identities: BTreeMap<String, String>,
+    /// The scanner's token, and the scan policy checked.
+    pub scan_token: Option<String>,
+    pub scan: Option<Policy<domain::config::ScanAction>>,
+    /// Per event webhook: its token.
+    pub event_tokens: BTreeMap<String, String>,
+    /// Per authorization webhook: its bearer token, or Basic credentials.
+    pub webhook_auth: BTreeMap<String, WebhookAuth>,
+}
+
+/// How an authorization webhook is called.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WebhookAuth {
+    pub bearer_token: Option<String>,
+    pub basic: Option<(String, String)>,
 }
 
 /// The two files of an instance and what tells them apart.
@@ -304,10 +371,88 @@ pub fn model(spec: &LocalInstanceSpec, resolved: &Resolved) -> AngosConfig {
                 clock_skew_tolerance: provider.clock_skew_tolerance,
                 http_request_timeout_secs: provider.http_request_timeout_secs,
                 jwks_refresh_timeout_secs: provider.jwks_refresh_timeout_secs,
+                tls: client_tls(&format!("oidc-{}", provider.name), provider.tls.as_ref()),
                 ..Default::default()
             },
         );
     }
+    for webhook in &spec.auth.webhooks {
+        let auth = resolved
+            .webhook_auth
+            .get(&webhook.name)
+            .cloned()
+            .unwrap_or_default();
+        config.auth.webhook.insert(
+            webhook.name.clone(),
+            domain::config::AuthWebhook {
+                url: webhook.url.clone(),
+                timeout_ms: webhook.timeout_ms,
+                bearer_token: auth.bearer_token,
+                basic_auth: auth
+                    .basic
+                    .map(|(username, password)| domain::config::BasicAuth { username, password }),
+                tls: client_tls(&format!("webhook-{}", webhook.name), webhook.tls.as_ref()),
+                forward_headers: webhook.forward_headers.clone(),
+            },
+        );
+    }
+    config.global.authorization_webhook = spec
+        .auth
+        .webhooks
+        .iter()
+        .find(|w| w.default)
+        .map(|w| w.name.clone());
+    for webhook in &spec.event_webhooks {
+        use api::config::{DeliveryPolicy as P, EventKind as E};
+        use domain::config::{DeliveryPolicy, EventKind};
+        config.event_webhook.insert(
+            webhook.name.clone(),
+            domain::config::EventWebhook {
+                url: webhook.url.clone(),
+                policy: match webhook.policy {
+                    P::Required => DeliveryPolicy::Required,
+                    P::Optional => DeliveryPolicy::Optional,
+                    P::Async => DeliveryPolicy::Async,
+                },
+                token: resolved.event_tokens.get(&webhook.name).cloned(),
+                timeout_ms: webhook.timeout_ms,
+                max_retries: webhook.max_retries,
+                events: webhook
+                    .events
+                    .iter()
+                    .map(|e| match e {
+                        E::ManifestPush => EventKind::ManifestPush,
+                        E::ManifestPull => EventKind::ManifestPull,
+                        E::ManifestDelete => EventKind::ManifestDelete,
+                        E::BlobPush => EventKind::BlobPush,
+                        E::BlobPull => EventKind::BlobPull,
+                        E::TagCreate => EventKind::TagCreate,
+                        E::TagDelete => EventKind::TagDelete,
+                    })
+                    .collect(),
+                repository_filter: (!webhook.repository_filter.is_empty())
+                    .then(|| webhook.repository_filter.clone()),
+                tls: client_tls(&format!("event-{}", webhook.name), webhook.tls.as_ref()),
+            },
+        );
+    }
+    config.global.event_webhooks = spec
+        .event_webhooks
+        .iter()
+        .filter(|w| w.default)
+        .map(|w| w.name.clone())
+        .collect();
+    config.global.scan = spec.scan.as_ref().map(|scan| {
+        let policy = resolved.scan.clone().unwrap_or_default();
+        domain::config::Scan {
+            url: scan.url.clone(),
+            token: resolved.scan_token.clone(),
+            timeout_secs: scan.timeout_secs,
+            tls: client_tls("scan", scan.tls.as_ref()),
+            default: policy.default,
+            rules: policy.rules,
+        }
+    });
     if let Some(kube) = &spec.auth.kubernetes {
         config.auth.oidc.insert(
             kube.name.clone(),
@@ -423,7 +568,7 @@ pub fn render(spec: &LocalInstanceSpec, resolved: &Resolved) -> Result<Rendered,
         .iter()
         .map(Violation::to_string)
         .collect();
-    if config.global.scan.is_none()
+    if spec.scan.is_none()
         && spec
             .worker
             .as_ref()
@@ -484,6 +629,81 @@ mod tests {
 
     fn fs() -> LocalInstanceSpec {
         spec(json!({"storage": {"fs": {}}}))
+    }
+
+    #[test]
+    fn the_scanner_and_the_webhooks_render_with_their_secrets_and_tls() {
+        let s = spec(json!({
+            "storage": {"fs": {}},
+            "worker": {"queues": ["scan"]},
+            "scan": {"url": "https://scanner:8766", "tokenSecretRef": {"name": "scan", "key": "token"},
+                     "tls": {"ca": {"configMapKeyRef": {"name": "ca", "key": "ca.pem"}}},
+                     "default": "Scan"},
+            "eventWebhooks": [
+                {"name": "audit", "url": "https://audit", "policy": "Async",
+                 "tokenSecretRef": {"name": "audit", "key": "token"},
+                 "events": ["manifest.push", "tag.delete"], "default": true},
+                {"name": "ci", "url": "https://ci", "policy": "Required",
+                 "tokenSecretRef": {"name": "ci", "key": "token"}, "events": ["manifest.push"]},
+            ],
+            "auth": {"webhooks": [
+                {"name": "opa", "url": "https://opa", "timeoutMs": 500, "default": true,
+                 "bearerTokenSecretRef": {"name": "opa", "key": "token"},
+                 "tls": {"clientCertificateSecretName": "opa-client"}},
+            ]},
+        }));
+        let mut resolved = Resolved {
+            scan_token: Some("S".into()),
+            scan: Some(Policy {
+                default: Some(domain::config::ScanAction::Scan),
+                rules: Vec::new(),
+            }),
+            ..Default::default()
+        };
+        resolved.event_tokens.insert("audit".into(), "A".into());
+        resolved.event_tokens.insert("ci".into(), "C".into());
+        resolved.webhook_auth.insert(
+            "opa".into(),
+            WebhookAuth {
+                bearer_token: Some("O".into()),
+                basic: None,
+            },
+        );
+        let rendered = render(&s, &resolved).unwrap();
+        let hot: toml::Table = toml::from_str(&rendered.hot_file).unwrap();
+        let global = &hot["global"];
+        assert_eq!(global["scan"]["url"].as_str(), Some("https://scanner:8766"));
+        assert_eq!(global["scan"]["token"].as_str(), Some("S"));
+        assert_eq!(global["scan"]["default"].as_str(), Some("scan"));
+        assert_eq!(
+            global["scan"]["server_ca_bundle"].as_str(),
+            Some("/etc/angos/client-tls/scan/ca.crt")
+        );
+        assert_eq!(global["event_webhooks"].as_array().unwrap().len(), 1);
+        assert_eq!(global["authorization_webhook"].as_str(), Some("opa"));
+        assert_eq!(
+            hot["event_webhook"]["ci"]["policy"].as_str(),
+            Some("required")
+        );
+        assert_eq!(hot["event_webhook"]["audit"]["token"].as_str(), Some("A"));
+        let opa = &hot["auth"]["webhook"]["opa"];
+        assert_eq!(opa["bearer_token"].as_str(), Some("O"));
+        assert_eq!(
+            opa["client_private_key"].as_str(),
+            Some("/etc/angos/client-tls/webhook-opa/tls.key")
+        );
+        assert_eq!(
+            client_tls_slots(&s)
+                .iter()
+                .map(|(slot, _)| slot.as_str())
+                .collect::<Vec<_>>(),
+            ["webhook-opa", "scan"]
+        );
+        // Without a scanner, the scan queue would stop the worker.
+        let mut no_scan = s.clone();
+        no_scan.scan = None;
+        let refused = render(&no_scan, &resolved).unwrap_err();
+        assert!(refused.to_string().contains("scan queue"), "{refused}");
     }
 
     #[test]

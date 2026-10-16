@@ -55,6 +55,12 @@
       },
       "type": "object"
     },
+    "authorizationWebhook": {
+      "description": "An authorization webhook of the instance\n(`spec.auth.webhooks[].name`) asked for this repository's requests\ninstead of the default one. Unset: the instance's default (Angos\nhas no way to turn it off for one repository).",
+      "minLength": 1,
+      "nullable": true,
+      "type": "string"
+    },
     "downstreams": {
       "description": "Registries it replicates to (`[[downstream]]`).",
       "items": {
@@ -123,6 +129,13 @@
           "url"
         ],
         "type": "object"
+      },
+      "type": "array"
+    },
+    "eventWebhooks": {
+      "description": "Event webhooks of the instance (`spec.eventWebhooks[].name`) told of\nthis repository; not empty, it **replaces** the instance's default\nones.",
+      "items": {
+        "type": "string"
       },
       "type": "array"
     },
@@ -225,6 +238,35 @@
         }
       },
       "type": "object"
+    },
+    "scan": {
+      "description": "`scan` policy, replacing the instance's: needs the instance's\n`spec.scan`.",
+      "nullable": true,
+      "properties": {
+        "default": {
+          "description": "What applies when no rule matches; a matching rule does the\nopposite.",
+          "enum": [
+            "Scan",
+            "Skip",
+            null
+          ],
+          "nullable": true,
+          "type": "string"
+        },
+        "rules": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object",
+      "x-kubernetes-validations": [
+        {
+          "message": "a scan policy sets a default or rules",
+          "rule": "has(self.default) || size(self.rules) > 0"
+        }
+      ]
     },
     "upstreams": {
       "default": [],

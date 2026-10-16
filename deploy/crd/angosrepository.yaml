@@ -81,6 +81,15 @@ spec:
                       type: string
                     type: array
                 type: object
+              authorizationWebhook:
+                description: |-
+                  An authorization webhook of the instance
+                  (`spec.auth.webhooks[].name`) asked for this repository's requests
+                  instead of the default one. Unset: the instance's default (Angos
+                  has no way to turn it off for one repository).
+                minLength: 1
+                nullable: true
+                type: string
               downstreams:
                 description: Registries it replicates to (`[[downstream]]`).
                 items:
@@ -137,6 +146,14 @@ spec:
                   - name
                   - url
                   type: object
+                type: array
+              eventWebhooks:
+                description: |-
+                  Event webhooks of the instance (`spec.eventWebhooks[].name`) told of
+                  this repository; not empty, it **replaces** the instance's default
+                  ones.
+                items:
+                  type: string
                 type: array
               immutableTags:
                 description: '`immutable_tags` (OR with the instance''s).'
@@ -229,6 +246,30 @@ spec:
                       type: string
                     type: array
                 type: object
+              scan:
+                description: |-
+                  `scan` policy, replacing the instance's: needs the instance's
+                  `spec.scan`.
+                nullable: true
+                properties:
+                  default:
+                    description: |-
+                      What applies when no rule matches; a matching rule does the
+                      opposite.
+                    enum:
+                    - Scan
+                    - Skip
+                    - null
+                    nullable: true
+                    type: string
+                  rules:
+                    items:
+                      type: string
+                    type: array
+                type: object
+                x-kubernetes-validations:
+                - message: a scan policy sets a default or rules
+                  rule: has(self.default) || size(self.rules) > 0
               upstreams:
                 default: []
                 description: |-

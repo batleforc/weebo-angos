@@ -80,6 +80,37 @@ pub struct AngosRepositorySpec {
     /// `image`; unset, the instance's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index: Option<ImagePolicy>,
+    /// `scan` policy, replacing the instance's: needs the instance's
+    /// `spec.scan`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan: Option<ScanPolicy>,
+    /// Event webhooks of the instance (`spec.eventWebhooks[].name`) told of
+    /// this repository; not empty, it **replaces** the instance's default
+    /// ones.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub event_webhooks: Vec<String>,
+    /// An authorization webhook of the instance
+    /// (`spec.auth.webhooks[].name`) asked for this repository's requests
+    /// instead of the default one. Unset: the instance's default (Angos
+    /// has no way to turn it off for one repository).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(min = 1))]
+    pub authorization_webhook: Option<String>,
+}
+
+/// A repository's `scan` policy.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(extend("x-kubernetes-validations" = [
+    {"rule": "has(self.default) || size(self.rules) > 0", "message": "a scan policy sets a default or rules"}
+]))]
+pub struct ScanPolicy {
+    /// What applies when no rule matches; a matching rule does the
+    /// opposite.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<crate::config::ScanDefault>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<String>,
 }
 
 /// The vocabulary of weebo-si's charts: subjects `anonymous`,
