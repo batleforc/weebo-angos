@@ -162,6 +162,51 @@ spec:
                           items:
                             type: string
                           type: array
+                        tls:
+                          description: |-
+                            The CA the provider's certificate is checked with (beside the
+                            public roots), and a client certificate.
+                          nullable: true
+                          properties:
+                            ca:
+                              description: A PEM bundle (`server_ca_bundle`).
+                              nullable: true
+                              properties:
+                                configMapKeyRef:
+                                  description: A key of a ConfigMap of the namespace.
+                                  nullable: true
+                                  properties:
+                                    key:
+                                      type: string
+                                    name:
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                secretKeyRef:
+                                  description: A key of a `Secret` in the referencing CR's own namespace.
+                                  nullable: true
+                                  properties:
+                                    key:
+                                      type: string
+                                    name:
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                              type: object
+                              x-kubernetes-validations:
+                              - message: a CA bundle is in a ConfigMap or a Secret
+                                rule: has(self.configMapKeyRef) != has(self.secretKeyRef)
+                            clientCertificateSecretName:
+                              description: |-
+                                A `kubernetes.io/tls` Secret (`tls.crt`, `tls.key`) labelled
+                                `angos.weebo.io/credential: "true"`, presented for mTLS.
+                              nullable: true
+                              type: string
+                          type: object
                       required:
                       - name
                       type: object
@@ -209,6 +254,132 @@ spec:
                     required:
                     - realm
                     type: object
+                  webhooks:
+                    description: |-
+                      `[auth.webhook.<name>]`: HTTP services asked whether a request is
+                      allowed (after the access policies). One may be the instance's
+                      `default` (`global.authorization_webhook`): it then decides every
+                      request — the probes included — and **fails closed**.
+                    items:
+                      description: '`[auth.webhook.<name>]`.'
+                      properties:
+                        basicAuthSecretRef:
+                          description: |-
+                            Basic credentials (`username`, `password` keys), from a Secret
+                            labelled `angos.weebo.io/credential: "true"`.
+                          nullable: true
+                          properties:
+                            name:
+                              type: string
+                            passwordKey:
+                              default: password
+                              type: string
+                            usernameKey:
+                              default: username
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        bearerTokenSecretRef:
+                          description: |-
+                            A bearer token, from a Secret labelled
+                            `angos.weebo.io/credential: "true"`.
+                          nullable: true
+                          properties:
+                            key:
+                              type: string
+                            name:
+                              type: string
+                          required:
+                          - key
+                          - name
+                          type: object
+                        default:
+                          default: false
+                          description: |-
+                            `global.authorization_webhook`: asked for every request without a
+                            repository's own.
+                          type: boolean
+                        forwardHeaders:
+                          description: Request headers forwarded to the webhook.
+                          items:
+                            type: string
+                          type: array
+                        name:
+                          description: The key repositories name it by (`authorizationWebhook`).
+                          maxLength: 63
+                          minLength: 1
+                          pattern: ^[A-Za-z0-9_-]+$
+                          type: string
+                        timeoutMs:
+                          description: How long Angos waits for an answer (required by Angos).
+                          format: uint64
+                          minimum: 1.0
+                          type: integer
+                        tls:
+                          description: |-
+                            A client's TLS towards a service: the CA its certificate is checked
+                            with (beside the public roots) and the certificate presented. Mounted in
+                            the pods: a change rolls them.
+                          nullable: true
+                          properties:
+                            ca:
+                              description: A PEM bundle (`server_ca_bundle`).
+                              nullable: true
+                              properties:
+                                configMapKeyRef:
+                                  description: A key of a ConfigMap of the namespace.
+                                  nullable: true
+                                  properties:
+                                    key:
+                                      type: string
+                                    name:
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                secretKeyRef:
+                                  description: A key of a `Secret` in the referencing CR's own namespace.
+                                  nullable: true
+                                  properties:
+                                    key:
+                                      type: string
+                                    name:
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                              type: object
+                              x-kubernetes-validations:
+                              - message: a CA bundle is in a ConfigMap or a Secret
+                                rule: has(self.configMapKeyRef) != has(self.secretKeyRef)
+                            clientCertificateSecretName:
+                              description: |-
+                                A `kubernetes.io/tls` Secret (`tls.crt`, `tls.key`) labelled
+                                `angos.weebo.io/credential: "true"`, presented for mTLS.
+                              nullable: true
+                              type: string
+                          type: object
+                        url:
+                          pattern: ^https?://
+                          type: string
+                      required:
+                      - name
+                      - timeoutMs
+                      - url
+                      type: object
+                      x-kubernetes-validations:
+                      - message: an authorization webhook authenticates with a bearer token or Basic credentials, not both
+                        rule: '!(has(self.bearerTokenSecretRef) && has(self.basicAuthSecretRef))'
+                    maxItems: 32
+                    type: array
+                    x-kubernetes-validations:
+                    - message: at most one authorization webhook is the default
+                      rule: self.filter(w, w.default).size() <= 1
+                    - message: authorization webhook names are unique
+                      rule: self.all(w, self.exists_one(o, o.name == w.name))
                 type: object
               cache:
                 description: '`[cache]`: unset, Angos caches in memory.'
@@ -255,6 +426,139 @@ spec:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
                 type: array
+              eventWebhooks:
+                description: '`[event_webhook.<name>]`: told of pushes, pulls and deletions.'
+                items:
+                  description: |-
+                    `[event_webhook.<name>]`: an HTTP endpoint told of pushes, pulls and
+                    deletions.
+                  properties:
+                    default:
+                      default: false
+                      description: |-
+                        In `global.event_webhooks`: told of every repository without its
+                        own list.
+                      type: boolean
+                    events:
+                      items:
+                        enum:
+                        - manifest.push
+                        - manifest.pull
+                        - manifest.delete
+                        - blob.push
+                        - blob.pull
+                        - tag.create
+                        - tag.delete
+                        type: string
+                      minItems: 1
+                      type: array
+                    maxRetries:
+                      description: 'At most 16. Angos: 3 for `Required`, 0 otherwise.'
+                      format: uint32
+                      maximum: 16.0
+                      minimum: 0.0
+                      nullable: true
+                      type: integer
+                    name:
+                      description: The key repositories name it by (`eventWebhooks`).
+                      maxLength: 63
+                      minLength: 1
+                      pattern: ^[A-Za-z0-9_-]+$
+                      type: string
+                    policy:
+                      description: |-
+                        `Required`: the request fails when the webhook does; `Optional`:
+                        tried, never blocking; `Async`: sent in the background.
+                      enum:
+                      - Required
+                      - Optional
+                      - Async
+                      type: string
+                    repositoryFilter:
+                      description: 'Regexes of the namespaces reported; empty: all.'
+                      items:
+                        type: string
+                      type: array
+                    timeoutMs:
+                      description: 'Angos: 5000.'
+                      format: uint64
+                      minimum: 1.0
+                      nullable: true
+                      type: integer
+                    tls:
+                      description: |-
+                        A client's TLS towards a service: the CA its certificate is checked
+                        with (beside the public roots) and the certificate presented. Mounted in
+                        the pods: a change rolls them.
+                      nullable: true
+                      properties:
+                        ca:
+                          description: A PEM bundle (`server_ca_bundle`).
+                          nullable: true
+                          properties:
+                            configMapKeyRef:
+                              description: A key of a ConfigMap of the namespace.
+                              nullable: true
+                              properties:
+                                key:
+                                  type: string
+                                name:
+                                  type: string
+                              required:
+                              - key
+                              - name
+                              type: object
+                            secretKeyRef:
+                              description: A key of a `Secret` in the referencing CR's own namespace.
+                              nullable: true
+                              properties:
+                                key:
+                                  type: string
+                                name:
+                                  type: string
+                              required:
+                              - key
+                              - name
+                              type: object
+                          type: object
+                          x-kubernetes-validations:
+                          - message: a CA bundle is in a ConfigMap or a Secret
+                            rule: has(self.configMapKeyRef) != has(self.secretKeyRef)
+                        clientCertificateSecretName:
+                          description: |-
+                            A `kubernetes.io/tls` Secret (`tls.crt`, `tls.key`) labelled
+                            `angos.weebo.io/credential: "true"`, presented for mTLS.
+                          nullable: true
+                          type: string
+                      type: object
+                    tokenSecretRef:
+                      description: |-
+                        The bearer token Angos sends, from a Secret labelled
+                        `angos.weebo.io/credential: "true"`.
+                      properties:
+                        key:
+                          type: string
+                        name:
+                          type: string
+                      required:
+                      - key
+                      - name
+                      type: object
+                    url:
+                      pattern: ^https?://
+                      type: string
+                  required:
+                  - events
+                  - name
+                  - policy
+                  - tokenSecretRef
+                  - url
+                  type: object
+                maxItems: 32
+                type: array
+                x-kubernetes-validations:
+                - message: event webhook names are unique
+                  rule: self.all(w, self.exists_one(o, o.name == w.name))
               extraConfig:
                 description: |-
                   Keys of Angos's configuration no typed field renders, merged last
@@ -726,6 +1030,100 @@ spec:
                 description: 'Unset: requests 100m CPU / 256Mi, limit 1Gi.'
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
+              scan:
+                description: |-
+                  `[global.scan]`: the scanner (deployed apart) and the global scan
+                  policy. The scan queue's jobs call it.
+                nullable: true
+                properties:
+                  default:
+                    description: |-
+                      What applies when no rule matches (unset: `Skip`); a matching rule
+                      does the opposite. A repository's own `scan` replaces it.
+                    enum:
+                    - Scan
+                    - Skip
+                    - null
+                    nullable: true
+                    type: string
+                  rules:
+                    description: CEL rules on `image`.
+                    items:
+                      type: string
+                    type: array
+                  timeoutSecs:
+                    description: 'Angos: 600.'
+                    format: uint64
+                    minimum: 1.0
+                    nullable: true
+                    type: integer
+                  tls:
+                    description: |-
+                      A client's TLS towards a service: the CA its certificate is checked
+                      with (beside the public roots) and the certificate presented. Mounted in
+                      the pods: a change rolls them.
+                    nullable: true
+                    properties:
+                      ca:
+                        description: A PEM bundle (`server_ca_bundle`).
+                        nullable: true
+                        properties:
+                          configMapKeyRef:
+                            description: A key of a ConfigMap of the namespace.
+                            nullable: true
+                            properties:
+                              key:
+                                type: string
+                              name:
+                                type: string
+                            required:
+                            - key
+                            - name
+                            type: object
+                          secretKeyRef:
+                            description: A key of a `Secret` in the referencing CR's own namespace.
+                            nullable: true
+                            properties:
+                              key:
+                                type: string
+                              name:
+                                type: string
+                            required:
+                            - key
+                            - name
+                            type: object
+                        type: object
+                        x-kubernetes-validations:
+                        - message: a CA bundle is in a ConfigMap or a Secret
+                          rule: has(self.configMapKeyRef) != has(self.secretKeyRef)
+                      clientCertificateSecretName:
+                        description: |-
+                          A `kubernetes.io/tls` Secret (`tls.crt`, `tls.key`) labelled
+                          `angos.weebo.io/credential: "true"`, presented for mTLS.
+                        nullable: true
+                        type: string
+                    type: object
+                  tokenSecretRef:
+                    description: |-
+                      The scanner's token, from a Secret labelled
+                      `angos.weebo.io/credential: "true"`.
+                    nullable: true
+                    properties:
+                      key:
+                        type: string
+                      name:
+                        type: string
+                    required:
+                    - key
+                    - name
+                    type: object
+                  url:
+                    description: The scanner's base URL (Angos posts to `<url>/scan`).
+                    pattern: ^https?://
+                    type: string
+                required:
+                - url
+                type: object
               securityContext:
                 description: 'Unset: read-only root filesystem, no capability, no escalation.'
                 type: object

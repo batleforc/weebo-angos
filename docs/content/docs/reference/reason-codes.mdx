@@ -63,6 +63,7 @@ kubectl get events -A --field-selector reason=InvalidSpec
 | `GcGraceLowered` | advisory | condition `GcGraceLowered: True`, Event (`Normal`) | `global.gcGraceSecs` was lowered on an instance in service. |
 | `VolumeNotResized` | advisory | condition `VolumeNotResized: True`, Event (`Normal`) | The storage volume asks for another size than its existing claim: a claim is never resized by the operator. |
 | `StorageCredentialsRotated` | advisory | condition `StorageCredentialsRotated: True`, Event (`Normal`) | The S3 credentials changed alone: the pods rolled without a confirmation. |
+| `DefaultAuthorizationWebhook` | advisory | condition `DefaultAuthorizationWebhook: True`, Event (`Normal`) | An authorization webhook is the instance's default: it decides every request, the probes included, and fails closed — a webhook down takes the pods out of service. |
 | `IssuerDiscoveryNotBound` | advisory | condition `IssuerDiscoveryNotBound: True`, Event (`Normal`) | `auth.kubernetes` is used: the instance's account must be bound to `system:service-account-issuer-discovery` (gitops). |
 | `ConfigReloaded` | advisory | Event (`Normal`) | Every pod loaded the new hot layer (Event only). |
 | `ConfigRolledOut` | advisory | Event (`Normal`) | The pods rolled onto a new startup layer or image (Event only). |

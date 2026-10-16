@@ -38,7 +38,9 @@ spec:
 | Field | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
 | `access` | `object` | no | `{"browse":[],"delete":[],"pull":[],"push":[]}` | Who may do what (`access_policy`). |
+| `authorizationWebhook` | `string` | no |  | An authorization webhook of the instance (`spec.auth.webhooks[].name`) asked for this repository's requests instead of the default one. Unset: the instance's default (Angos has no way to turn it off for one repository). |
 | `downstreams` | `object[]` | no |  | Registries it replicates to (`[[downstream]]`). |
+| `eventWebhooks` | `string[]` | no |  | Event webhooks of the instance (`spec.eventWebhooks[].name`) told of this repository; not empty, it **replaces** the instance's default ones. |
 | `immutableTags` | `boolean` | no |  | `immutable_tags` (OR with the instance's). |
 | `immutableTagsExclusions` | `string[]` | no |  | `immutable_tags_exclusions`: regexes. Not empty, it **replaces** the instance's list. |
 | `index` | `object` | no |  | `index` policy: `default` (`index` or `skip`) and CEL rules on `image`; unset, the instance's. |
@@ -46,6 +48,7 @@ spec:
 | `mirrorOf` | `string` | no |  | `namespace`: the `?ns=` value it answers to as a mirror (Docker's mirror requests name the upstream registry). |
 | `prefix` | `string` | yes |  | The namespaces it covers: `<prefix>` and `<prefix>/…` (an OCI namespace: lowercase segments, no quote). **Immutable**: changing it would move the data out of the repository (delete and recreate). |
 | `retention` | `object` | no |  | `retention_policy`: CEL rules on `image`; a matching one keeps the image (OR with the instance's), `angos prune` deletes the others. |
+| `scan` | `object` | no |  | `scan` policy, replacing the instance's: needs the instance's `spec.scan`. |
 | `upstreams` | `object[]` | no | `[]` | Registries it caches from, tried in order (`[[upstream]]`): a pull-through cache, which refuses every push. |
 
 ## Build a manifest

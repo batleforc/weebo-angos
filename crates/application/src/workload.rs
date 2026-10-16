@@ -24,9 +24,9 @@ use k8s_openapi::api::core::v1::{
     ConfigMapProjection, Container, ContainerPort, EmptyDirVolumeSource, EnvVar, HTTPGetAction,
     KeyToPath, Lifecycle, LifecycleHandler, PersistentVolumeClaim, PersistentVolumeClaimSpec,
     PersistentVolumeClaimVolumeSource, PodAffinity, PodAffinityTerm, PodSpec, PodTemplateSpec,
-    Probe, ProjectedVolumeSource, ResourceRequirements, Secret, SecretVolumeSource, Service,
-    ServiceAccount, ServiceAccountTokenProjection, ServicePort, ServiceSpec, SleepAction, Volume,
-    VolumeMount, VolumeProjection, VolumeResourceRequirements,
+    Probe, ProjectedVolumeSource, ResourceRequirements, Secret, SecretProjection,
+    SecretVolumeSource, Service, ServiceAccount, ServiceAccountTokenProjection, ServicePort,
+    ServiceSpec, SleepAction, Volume, VolumeMount, VolumeProjection, VolumeResourceRequirements,
 };
 use k8s_openapi::api::policy::v1::{PodDisruptionBudget, PodDisruptionBudgetSpec};
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
@@ -229,6 +229,75 @@ fn claim(fs: &FsStorage, created: String) -> Option<(String, bool)> {
     })
 }
 
+/// The client TLS files of the services the spec calls (scanner,
+/// webhooks, OIDC providers), one directory per slot: a projected volume
+/// and its mount, or none.
+pub fn client_tls_volume(spec: &LocalInstanceSpec) -> Option<(Volume, VolumeMount)> {
+    use crate::render::tls_files;
+    let slots = crate::render::client_tls_slots(spec);
+    if slots.is_empty() {
+        return None;
+    }
+    let item = |key: &str, slot: &str, file: &str| KeyToPath {
+        key: key.into(),
+        path: format!("{slot}/{file}"),
+        ..Default::default()
+    };
+    let mut sources = Vec::new();
+    for (slot, tls) in &slots {
+        if let Some(ca) = &tls.ca {
+            match (&ca.config_map_key_ref, &ca.secret_key_ref) {
+                (Some(r), _) => sources.push(VolumeProjection {
+                    config_map: Some(ConfigMapProjection {
+                        name: r.name.clone(),
+                        items: Some(vec![item(&r.key, slot, tls_files::CA)]),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                (None, Some(r)) => sources.push(VolumeProjection {
+                    secret: Some(SecretProjection {
+                        name: r.name.clone(),
+                        items: Some(vec![item(&r.key, slot, tls_files::CA)]),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                (None, None) => {}
+            }
+        }
+        if let Some(name) = &tls.client_certificate_secret_name {
+            sources.push(VolumeProjection {
+                secret: Some(SecretProjection {
+                    name: name.clone(),
+                    items: Some(vec![
+                        item("tls.crt", slot, tls_files::CERTIFICATE),
+                        item("tls.key", slot, tls_files::KEY),
+                    ]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+        }
+    }
+    Some((
+        Volume {
+            name: "client-tls".into(),
+            projected: Some(ProjectedVolumeSource {
+                sources: Some(sources),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        VolumeMount {
+            name: "client-tls".into(),
+            mount_path: paths::CLIENT_TLS_DIR.into(),
+            read_only: Some(true),
+            ..Default::default()
+        },
+    ))
+}
+
 /// Whether the pods share a single-writer volume: a surge pod would wait
 /// for it, they are recreated instead.
 pub fn single_writer(spec: &LocalInstanceSpec) -> bool {
@@ -363,6 +432,10 @@ fn deployment(input: &WorkloadInput<'_>, role: Role) -> Deployment {
             ..Default::default()
         });
         mounts.push(mount("kube", paths::KUBE_DIR, true));
+    }
+    if let Some((volume, mount)) = client_tls_volume(spec) {
+        volumes.push(volume);
+        mounts.push(mount);
     }
     for (volume, fs, created) in [
         ("data", spec.storage.fs.as_ref(), names.data()),
@@ -972,6 +1045,37 @@ mod tests {
                 [0]["labelSelector"]["matchLabels"]["app.kubernetes.io/component"],
             "server"
         );
+    }
+
+    #[test]
+    fn client_tls_files_are_projected_per_slot() {
+        let s = spec(json!({
+            "storage": {"fs": {}},
+            "scan": {"url": "https://scanner", "tls": {
+                "ca": {"secretKeyRef": {"name": "scan-ca", "key": "ca"}},
+                "clientCertificateSecretName": "scan-client"}},
+            "auth": {"oidc": [{"name": "corp", "issuer": "https://idp", "audience": "angos",
+                               "tls": {"ca": {"configMapKeyRef": {"name": "corp-ca", "key": "ca.crt"}}}}]},
+        }));
+        let (volume, mount) = client_tls_volume(&s).unwrap();
+        assert_eq!(mount.mount_path, "/etc/angos/client-tls");
+        let sources = serde_json::to_value(volume.projected.unwrap().sources).unwrap();
+        assert_eq!(
+            sources,
+            json!([
+                {"configMap": {"name": "corp-ca", "items": [{"key": "ca.crt", "path": "oidc-corp/ca.crt"}]}},
+                {"secret": {"name": "scan-ca", "items": [{"key": "ca", "path": "scan/ca.crt"}]}},
+                {"secret": {"name": "scan-client", "items": [
+                    {"key": "tls.crt", "path": "scan/tls.crt"}, {"key": "tls.key", "path": "scan/tls.key"}]}},
+            ])
+        );
+        // The Secrets the pods would read must consent.
+        let objects = sketch("reg", "team", &s, "ghcr.io/project-angos/angos:1.12.3");
+        assert_eq!(
+            weebo_kit_application::pod_safety::secrets_to_check(&objects),
+            ["scan-ca".to_string(), "scan-client".to_string()].into()
+        );
+        assert!(client_tls_volume(&spec(json!({"storage": {"fs": {}}}))).is_none());
     }
 
     #[test]

@@ -452,6 +452,27 @@ fi
 code="$(registry -k https://secure.team-a.svc:8000/readyz)"
 [ "$code" = 200 ] || fail "secure: /readyz answered $code with the worker"
 
+step "a scanner and an event webhook: rendered, and accepted by every pod"
+kubectl -n team-a create secret generic hooks --from-literal=token=e2e-token \
+  --dry-run=client -o yaml | kubectl label --local -f - angos.weebo.io/credential=true -o yaml \
+  | kubectl apply -f -
+applied_before="$(kubectl -n team-a get angoslocalinstance secure -o jsonpath='{.status.appliedConfigHash}')"
+kubectl -n team-a patch angoslocalinstance secure --type merge -p '{"spec":{
+  "scan":{"url":"http://scanner.team-a.svc:8766","tokenSecretRef":{"name":"hooks","key":"token"},"default":"Skip"},
+  "eventWebhooks":[{"name":"audit","url":"http://audit.team-a.svc/events","policy":"Async",
+    "tokenSecretRef":{"name":"hooks","key":"token"},"events":["manifest.push"],"default":true}]}}'
+for _ in $(seq 1 120); do
+  hash="$(kubectl -n team-a get angoslocalinstance secure -o jsonpath='{.status.appliedConfigHash}')"
+  want="$(kubectl -n team-a get angoslocalinstance secure -o jsonpath='{.status.configHash}')"
+  [ -n "$hash" ] && [ "$hash" != "$applied_before" ] && [ "$hash" = "$want" ] && break
+  sleep 2
+done
+[ "$hash" = "$want" ] && [ "$hash" != "$applied_before" ] \
+  || fail "secure: the scanner and the webhook were never confirmed ($(kubectl -n team-a get angoslocalinstance secure -o jsonpath='{.status.conditions}'))"
+hot="$(kubectl -n team-a get secret secure-config -o jsonpath='{.data.config\.toml}' | base64 -d)"
+printf '%s' "$hot" | grep -q '^\[global.scan\]' || fail "secure: no [global.scan]"
+printf '%s' "$hot" | grep -q '^\[event_webhook.audit\]' || fail "secure: no [event_webhook.audit]"
+
 step "the webhook refuses what the operator wouldn't run"
 if kubectl apply -f - 2>/dev/null <<'YAML'
 apiVersion: angos.weebo.io/v1alpha1

@@ -13,7 +13,8 @@ use serde::{Deserialize, Serialize};
 pub use weebo_kit_api::{AttachNamespaces, NamespacesFrom, SharedWith};
 
 use crate::config::{
-    Auth, Cache, ExtraConfig, Global, Reload, Server, Storage, Tracing, Ui, open_object,
+    Auth, Cache, EventWebhook, ExtraConfig, Global, Reload, Scan, Server, Storage, Tracing, Ui,
+    open_object,
 };
 use crate::status::InstanceStatus;
 
@@ -133,6 +134,17 @@ pub struct AngosLocalInstanceSpec {
     pub global: Global,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache: Option<Cache>,
+    /// `[global.scan]`: the scanner (deployed apart) and the global scan
+    /// policy. The scan queue's jobs call it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan: Option<Scan>,
+    /// `[event_webhook.<name>]`: told of pushes, pulls and deletions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(extend("x-kubernetes-validations" = [
+        {"rule": "self.all(w, self.exists_one(o, o.name == w.name))", "message": "event webhook names are unique"}
+    ]))]
+    #[schemars(length(max = 32))]
+    pub event_webhooks: Vec<EventWebhook>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ui: Option<Ui>,
     #[serde(default)]
@@ -188,6 +200,8 @@ impl Default for AngosLocalInstanceSpec {
             storage: Storage::default(),
             global: Global::default(),
             cache: None,
+            scan: None,
+            event_webhooks: Vec::new(),
             ui: None,
             auth: Auth::default(),
             tracing: None,

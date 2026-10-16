@@ -47,6 +47,7 @@ spec:
 | `cache` | `object` | no |  | `[cache]`: unset, Angos caches in memory. |
 | `env` | `object[]` | no |  | Rarely needed (Angos reads no secret from its environment). Secrets read here must be labelled `angos.weebo.io/credential: "true"`; `RUST_LOG` is the operator's (`logLevel`). |
 | `envFrom` | `object[]` | no |  |  |
+| `eventWebhooks` | `object[]` | no |  | `[event_webhook.<name>]`: told of pushes, pulls and deletions. |
 | `extraConfig` | `object` | no |  | Keys of Angos's configuration no typed field renders, merged last into the hot file. Checked by Angos only (advisory `ExtraConfigUsed`). |
 | `extraVolumeMounts` | `object[]` | no |  |  |
 | `extraVolumes` | `object[]` | no |  | CA bundles and other files: no `hostPath`; Secrets labelled `angos.weebo.io/credential: "true"`. |
@@ -65,6 +66,7 @@ spec:
 | `replicas` | `integer` | no | `1` | The server's pods. More than one needs an S3 store and `worker.enabled`, and runs once Angos found the store's conditional writes atomic (`status.conditionalWrites`); until then, one. |
 | `repositorySelector` | `object` | no |  | Which `AngosRepository`s (and `AngosIdentity`s) the instance serves, and from which namespaces. |
 | `resources` | `object` | no |  | Unset: requests 100m CPU / 256Mi, limit 1Gi. |
+| `scan` | `object` | no |  | `[global.scan]`: the scanner (deployed apart) and the global scan policy. The scan queue's jobs call it. |
 | `securityContext` | `object` | no |  | Unset: read-only root filesystem, no capability, no escalation. |
 | `server` | `object` | no | `{"port":8000}` | `[server]`: the listener. |
 | `service` | `object` | no | `{"port":8000,"type":"ClusterIP"}` |  |

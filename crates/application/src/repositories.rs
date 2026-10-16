@@ -120,6 +120,8 @@ pub fn validate(
         namespace: spec.mirror_of.clone(),
         immutable_tags: spec.immutable_tags,
         immutable_tags_exclusions: spec.immutable_tags_exclusions.clone(),
+        authorization_webhook: spec.authorization_webhook.clone(),
+        event_webhooks: spec.event_webhooks.clone(),
         ..Default::default()
     };
     match rules::repository_access(&spec.access, kube, checker) {
@@ -148,6 +150,15 @@ pub fn validate(
             Ok((policy, more)) => {
                 warnings.extend(more);
                 repo.index = Some(policy);
+            }
+            Err(more) => problems.extend(more),
+        }
+    }
+    if let Some(scan) = &spec.scan {
+        match rules::scan_policy("spec.scan", scan.default, &scan.rules, checker) {
+            Ok((policy, more)) => {
+                warnings.extend(more);
+                repo.scan = Some(policy);
             }
             Err(more) => problems.extend(more),
         }
@@ -229,13 +240,59 @@ async fn downstream(
     })
 }
 
+/// What of the instance a repository may name: its scanner and webhooks.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct InstanceReferences {
+    pub scan: bool,
+    pub event_webhooks: std::collections::BTreeSet<String>,
+    pub auth_webhooks: std::collections::BTreeSet<String>,
+}
+
+impl InstanceReferences {
+    pub fn of(spec: &api::local_instance::LocalInstanceSpec) -> Self {
+        Self {
+            scan: spec.scan.is_some(),
+            event_webhooks: spec.event_webhooks.iter().map(|w| w.name.clone()).collect(),
+            auth_webhooks: spec.auth.webhooks.iter().map(|w| w.name.clone()).collect(),
+        }
+    }
+
+    /// What `spec` names that the instance lacks.
+    pub fn missing(&self, spec: &RepositorySpec) -> Problems {
+        let mut problems = Problems::new();
+        if spec.scan.is_some() && !self.scan {
+            problems.push("spec.scan: the instance has no scanner (its spec.scan)".into());
+        }
+        for name in &spec.event_webhooks {
+            if !self.event_webhooks.contains(name) {
+                problems.push(format!(
+                    "spec.eventWebhooks: the instance has no event webhook {name:?}"
+                ));
+            }
+        }
+        if let Some(name) = &spec.authorization_webhook
+            && !self.auth_webhooks.contains(name)
+        {
+            problems.push(format!(
+                "spec.authorizationWebhook: the instance has no authorization webhook {name:?}"
+            ));
+        }
+        problems
+    }
+}
+
 /// A repository as its table, its Secrets read: or what keeps it out.
 pub async fn render(
     view: &RepositoryView,
     kube: Kube<'_>,
+    references: &InstanceReferences,
     checker: &dyn CelChecker,
     credentials: &dyn Credentials,
 ) -> Result<(config::Repository, Vec<String>), (RenderState, String)> {
+    let missing = references.missing(&view.spec);
+    if !missing.is_empty() {
+        return Err((RenderState::Invalid, missing.join("; ")));
+    }
     let (mut repo, warnings) = validate(&view.spec, &view.annotations, kube, checker)
         .map_err(|problems| (RenderState::Invalid, problems.join("; ")))?;
     let refused = |e: CredentialError| {
@@ -279,6 +336,42 @@ mod tests {
             spec: serde_json::from_value(spec).unwrap(),
             deleting: false,
         }
+    }
+
+    #[tokio::test]
+    async fn a_repository_names_only_what_its_instance_has() {
+        let v = view(
+            "team",
+            "app",
+            "2026-01-01T00:00:00Z",
+            json!({"prefix": "app", "scan": {"default": "Scan"},
+                   "eventWebhooks": ["audit"], "authorizationWebhook": "opa"}),
+        );
+        let credentials = FakeCredentials::default();
+        let (state, message) = render(
+            &v,
+            None,
+            &InstanceReferences::default(),
+            &FakeCel::default(),
+            &credentials,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(state, RenderState::Invalid);
+        for what in ["spec.scan", "\"audit\"", "\"opa\""] {
+            assert!(message.contains(what), "{what} in {message}");
+        }
+        let references = InstanceReferences {
+            scan: true,
+            event_webhooks: ["audit".to_string()].into(),
+            auth_webhooks: ["opa".to_string()].into(),
+        };
+        let (repo, _) = render(&v, None, &references, &FakeCel::default(), &credentials)
+            .await
+            .unwrap();
+        assert_eq!(repo.event_webhooks, ["audit"]);
+        assert_eq!(repo.authorization_webhook.as_deref(), Some("opa"));
+        assert_eq!(repo.scan.unwrap().default, Some(config::ScanAction::Scan));
     }
 
     #[test]
@@ -337,9 +430,15 @@ mod tests {
                 "retention": {"rules": ["top_pushed(10)"]},
             }),
         );
-        let (repo, warnings) = render(&v, None, &FakeCel::default(), &credentials)
-            .await
-            .unwrap();
+        let (repo, warnings) = render(
+            &v,
+            None,
+            &InstanceReferences::default(),
+            &FakeCel::default(),
+            &credentials,
+        )
+        .await
+        .unwrap();
         assert!(warnings.is_empty());
         assert_eq!(repo.upstream[0].username.as_deref(), Some("u"));
         assert_eq!(repo.access_policy.unwrap().rules.len(), 1);
@@ -350,10 +449,16 @@ mod tests {
             ..v.clone()
         };
         assert_eq!(
-            render(&other, None, &FakeCel::default(), &credentials)
-                .await
-                .unwrap_err()
-                .0,
+            render(
+                &other,
+                None,
+                &InstanceReferences::default(),
+                &FakeCel::default(),
+                &credentials
+            )
+            .await
+            .unwrap_err()
+            .0,
             RenderState::SecretMissing
         );
     }
