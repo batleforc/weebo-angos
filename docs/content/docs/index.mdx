@@ -1,0 +1,22 @@
+---
+title: weebo-angos
+description: A Kubernetes operator that runs Angos OCI registries as CRDs.
+---
+
+`weebo-angos` runs [Angos](https://github.com/project-angos/angos), the
+OCI registry, from Kubernetes. Angos has no administration API: the
+operator renders its configuration from the CRs, runs its workload, and
+reads in the pods' logs whether they loaded it.
+
+<Callout type="warn">
+  Pre-alpha: an `AngosLocalInstance` is checked but runs nothing yet. The
+  workload (milestone M1), then `AngosRepository`, `AngosIdentity` and
+  `AngosMaintenance` come next. The operator targets Angos 1.12.3.
+</Callout>
+
+## Get started
+
+<Cards>
+  <Card title="Install via Helm" description="Bring up the operator." href="/docs/guides/install" />
+  <Card title="CRD reference" description="Every field of every resource." href="/docs/crds/angoslocalinstance" />
+</Cards>

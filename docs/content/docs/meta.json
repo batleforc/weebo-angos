@@ -1,0 +1,11 @@
+{
+  "title": "weebo-angos",
+  "pages": [
+    "index",
+    "---Getting started---",
+    "guides/install",
+    "---Reference---",
+    "...crds",
+    "reference"
+  ]
+}

@@ -121,6 +121,15 @@ specifiers = ["latest"]
 checksum = "sha256:65691ff77eb6fa44c908b77a1082c9f092c3b9733b5cefabec0d1104890e21a8"
 url = "https://dl.k8s.io/v1.37.1/bin/linux/amd64/kubectl"
 
+[[tools.node]]
+version = "24.22.0"
+backend = "core:node"
+specifiers = ["24"]
+
+[tools.node."platforms.linux-x64"]
+checksum = "sha256:28ea0a438de9a13bd7891fd758eee6c7819ee8af5442dfd8d45bd65e56d4228c"
+url = "https://nodejs.org/dist/v24.22.0/node-v24.22.0-linux-x64.tar.gz"
+
 [[tools.rust]]
 version = "1.99.0"
 backend = "core:rust"

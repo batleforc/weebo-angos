@@ -1,0 +1,12 @@
+---
+title: CRD reference
+description: Every kind the operator adds, its fields, and an interactive manifest builder.
+---
+
+Each page lists a kind's `spec` fields, shows a minimal example, and has a
+form that builds a ready-to-apply manifest. These pages are generated from
+the CRDs themselves, so they always match the installed version.
+
+| Kind | Short names | Scope | Description |
+| --- | --- | --- | --- |
+| [`AngosLocalInstance`](/docs/crds/angoslocalinstance) | `ali` | Namespaced | An Angos registry the operator runs in this namespace: its `Deployment`, its configuration (rendered from this spec, its repositories and identities) and the objects around them. |

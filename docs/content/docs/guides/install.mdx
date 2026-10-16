@@ -1,0 +1,48 @@
+---
+title: Install via Helm
+description: Bring up the operator with its chart.
+---
+
+The chart lives at `oci://ghcr.io/batleforc/charts/weebo-angos`. It
+needs [cert-manager](https://cert-manager.io) for the certificate of the
+operator's HTTPS server (probes and admission webhooks).
+
+```bash
+helm install weebo-angos \
+  oci://ghcr.io/batleforc/charts/weebo-angos \
+  --namespace weebo-angos --create-namespace \
+  --version <version>
+```
+
+The chart creates a self-signed issuer for that certificate. To use an
+issuer of yours, add `--set certManager.createIssuer=false --set
+certManager.issuerRef.name=<issuer>` (and `kind`, `ClusterIssuer` by
+default).
+
+## Limited to one namespace
+
+`--set watch.namespace=<namespace>` limits the operator to the instances
+of that namespace: its kinds move from the ClusterRole to a Role there,
+with every rule on namespaced resources — the objects of an instance
+(Deployments, Services, claims, NetworkPolicies, Jobs), its pods and their
+logs: the operator can write none of them elsewhere. The operator has no
+cluster-scoped kind; it still reads and writes Secrets through its
+ClusterRole (`clusterSecrets`). `watch.clusterKinds: false` (no
+ClusterRole at all) works the same, on the Role alone.
+
+## What an instance may run
+
+An `AngosLocalInstance` runs only images whose repository is in
+`managedInstances.allowedImages` (default `ghcr.io/project-angos/angos`,
+env `WEEBO_ANGOS_ALLOWED_IMAGES`), without `hostPath`, privilege or added
+capability, and its pods read only Secrets labelled
+`angos.weebo.io/credential: "true"`. Add your mirror to the list:
+
+```bash
+helm upgrade weebo-angos oci://ghcr.io/batleforc/charts/weebo-angos \
+  --reuse-values \
+  --set 'managedInstances.allowedImages={registry.example.com/project-angos/angos}'
+```
+
+Creating an `AngosLocalInstance` still lets its author run Angos with the
+Secrets of the namespace labelled for it: give the kind as you give pods.
