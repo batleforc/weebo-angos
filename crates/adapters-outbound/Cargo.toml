@@ -18,6 +18,10 @@ http = "1"
 base64 = { workspace = true }
 getrandom = "0.3"
 weebo-kit-application = { workspace = true }
+# Angos 1.12.3's CEL engine, pinned to its version (spec 2.6): `task
+# angos:bump` moves it with Angos.
+cel-interpreter = "=0.10.0"
+cel-parser = "=0.10.1"
 weebo-kit-adapters = { workspace = true }
 weebo-kit-api = { workspace = true }
 

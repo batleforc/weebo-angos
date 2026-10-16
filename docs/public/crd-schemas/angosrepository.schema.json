@@ -1,0 +1,301 @@
+{
+  "apiVersion": "angos.weebo.io/v1alpha1",
+  "kind": "AngosRepository",
+  "scope": "Namespaced",
+  "description": "A repository of an Angos instance: the namespaces under its `prefix`,\nwho may pull, browse, push and delete there, where it caches from and\nreplicates to. Rendered into the instance's configuration by the\ninstance; `Ready` once every pod of the instance runs it.",
+  "properties": {
+    "access": {
+      "default": {
+        "browse": [],
+        "delete": [],
+        "pull": [],
+        "push": []
+      },
+      "description": "Who may do what (`access_policy`).",
+      "properties": {
+        "browse": {
+          "default": [],
+          "description": "Who may list revisions and uploads.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "delete": {
+          "default": [],
+          "description": "Who may delete manifests and blobs.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pull": {
+          "default": [],
+          "description": "Who may pull (manifests, blobs, referrers, tags).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "push": {
+          "default": [],
+          "description": "Who may push.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "rules": {
+          "description": "More CEL rules (`request`, `identity`): a matching one allows.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "downstreams": {
+      "description": "Registries it replicates to (`[[downstream]]`).",
+      "items": {
+        "properties": {
+          "credentialsSecretRef": {
+            "nullable": true,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "passwordKey": {
+                "default": "password",
+                "type": "string"
+              },
+              "usernameKey": {
+                "default": "username",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "maxConcurrentPushes": {
+            "format": "uint64",
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          },
+          "mode": {
+            "description": "`EventAndReconcile` (default), `EventOnly` or `ReconcileOnly`.",
+            "enum": [
+              "EventAndReconcile",
+              "EventOnly",
+              "ReconcileOnly",
+              null
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "description": "Unique in the repository: the replication's job key and metrics\nlabel.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "namespaceFilter": {
+            "description": "Regexes of the namespaces replicated; empty: all.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "prune": {
+            "default": false,
+            "description": "Propagate deletions to the downstream: it needs the annotation\n`angos.weebo.io/allow-data-deletion: \"true\"` on the repository.",
+            "type": "boolean"
+          },
+          "url": {
+            "pattern": "^https?://",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "url"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "immutableTags": {
+      "description": "`immutable_tags` (OR with the instance's).",
+      "nullable": true,
+      "type": "boolean"
+    },
+    "immutableTagsExclusions": {
+      "description": "`immutable_tags_exclusions`: regexes. Not empty, it **replaces** the\ninstance's list.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "index": {
+      "description": "`index` policy: `default` (`index` or `skip`) and CEL rules on\n`image`; unset, the instance's.",
+      "nullable": true,
+      "properties": {
+        "default": {
+          "description": "What applies when no rule matches; a matching rule does the\nopposite.",
+          "enum": [
+            "Index",
+            "Skip",
+            null
+          ],
+          "nullable": true,
+          "type": "string"
+        },
+        "rules": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "instanceRef": {
+      "description": "The instance serving it: unset, the only one of this namespace. An\ninstance of another namespace must accept this one\n(`repositorySelector.namespaces`).",
+      "nullable": true,
+      "properties": {
+        "kind": {
+          "description": "The kind of instance a reference designates.",
+          "enum": [
+            "Instance",
+            "LocalInstance"
+          ],
+          "nullable": true,
+          "type": "string"
+        },
+        "name": {
+          "description": "`metadata.name` of the instance.",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Namespace of a `LocalInstance`. Defaults to this object's own;\nrequired on a cluster-scoped object. Another namespace's local\ninstance must share itself with this one (its `sharedWith`).",
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object",
+      "x-kubernetes-validations": [
+        {
+          "message": "namespace only applies to kind LocalInstance",
+          "rule": "!has(self.namespace) || !has(self.kind) || self.kind == 'LocalInstance'"
+        }
+      ]
+    },
+    "mirrorOf": {
+      "description": "`namespace`: the `?ns=` value it answers to as a mirror (Docker's\nmirror requests name the upstream registry).",
+      "nullable": true,
+      "type": "string"
+    },
+    "prefix": {
+      "description": "The namespaces it covers: `<prefix>` and `<prefix>/…` (an OCI\nnamespace: lowercase segments, no quote). **Immutable**: changing it\nwould move the data out of the repository (delete and recreate).",
+      "maxLength": 255,
+      "pattern": "^[a-z0-9]+(?:(?:__|[._]|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:__|[._]|-+)[a-z0-9]+)*)*$",
+      "type": "string",
+      "x-kubernetes-validations": [
+        {
+          "message": "prefix is immutable: delete the repository and create another",
+          "rule": "self == oldSelf"
+        }
+      ]
+    },
+    "retention": {
+      "description": "`retention_policy`: CEL rules on `image`; a matching one keeps the\nimage (OR with the instance's), `angos prune` deletes the others.",
+      "nullable": true,
+      "properties": {
+        "rules": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "upstreams": {
+      "default": [],
+      "description": "Registries it caches from, tried in order (`[[upstream]]`): a\npull-through cache, which refuses every push.",
+      "items": {
+        "properties": {
+          "connectTimeoutSecs": {
+            "description": "Angos: 30.",
+            "format": "uint64",
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "credentialsSecretRef": {
+            "description": "Basic credentials (`username`, `password` keys), in a Secret of\nthis namespace labelled `angos.weebo.io/credential: \"true\"`.",
+            "nullable": true,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "passwordKey": {
+                "default": "password",
+                "type": "string"
+              },
+              "usernameKey": {
+                "default": "username",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "maxRedirect": {
+            "description": "Angos: 5.",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "readTimeoutSecs": {
+            "description": "Angos: 300.",
+            "format": "uint64",
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "url": {
+            "description": "The registry, e.g. `https://registry-1.docker.io`; a path is the\nupstream namespace prefix.",
+            "pattern": "^https?://",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "prefix"
+  ],
+  "type": "object",
+  "x-kubernetes-validations": [
+    {
+      "message": "a pull-through repository (upstreams) refuses every push: access.push and access.delete must be empty",
+      "rule": "size(self.upstreams) == 0 || (size(self.access.push) == 0 && size(self.access.delete) == 0)"
+    }
+  ]
+}

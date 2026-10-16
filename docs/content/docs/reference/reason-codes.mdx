@@ -43,7 +43,7 @@ kubectl get events -A --field-selector reason=InvalidSpec
 | `ConfigPropagating` | blocking | `Ready: False`, Event (`Warning`) | The hot layer was written and the pods haven't all confirmed loading it yet. |
 | `ConfigRejected` | blocking | `Ready: False`, Event (`Warning`) | A pod refused the hot layer: the last accepted one was put back. Only a change (of the spec, a repository, a Secret) is tried again. |
 | `ReloadUnconfirmed` | advisory | condition `ReloadUnconfirmed: True`, Event (`Normal`) | No pod said whether it loaded the hot layer within `reload.timeoutSeconds` (`onUnconfirmed: Wait`). |
-| `PrefixConflict` | blocking | `Ready: False`, Event (`Warning`) | Another repository of the instance has the same prefix or one that overlaps it (`team` and `team/app`): the older one is rendered. |
+| `PrefixConflict` | blocking | `Ready: False`, Event (`Warning`), admission denial | Another repository of the instance has the same prefix or one that overlaps it (`team` and `team/app`): the older one is rendered. |
 | `UsernameConflict` | blocking | `Ready: False`, Event (`Warning`) | Another identity of the instance has the same username, or it equals the name of an OIDC provider. |
 | `DeletionNotAllowed` | blocking | `Ready: False`, Event (`Warning`) | Deleting the repository (or pruning a downstream) would erase its data at the next prune: it needs the annotation `angos.weebo.io/allow-data-deletion: "true"`. |
 | `MaintenanceFailed` | blocking | `Ready: False`, Event (`Warning`) | The maintenance run failed (its Job's exit code and last log lines in `status.lastRun`). |
@@ -55,7 +55,7 @@ kubectl get events -A --field-selector reason=InvalidSpec
 | `MaintenanceSuspended` | advisory | condition `MaintenanceSuspended: True`, Event (`Normal`) | The schedule is suspended (`suspend`, or the instance rolls out or upgrades). |
 | `UpgradeNotAllowed` | blocking | `Ready: False`, Event (`Warning`) | The image tag goes back below `status.version` or jumps more than one minor: it needs `angos.weebo.io/approved-upgrade` set to that tag. |
 | `LeavesWatchScope` | blocking | `Ready: False`, Event (`Warning`) | An update would take a CR still carrying the finalizer out of the operator's label selector (`watch.labelSelector`): refused at admission. |
-| `KubernetesApiError` | blocking | `Ready: False`, Event (`Warning`) | A Kubernetes API call of the operator itself failed (reading a CR or a Secret, applying an object, patching a status) — retried. |
+| `KubernetesApiError` | blocking | `Ready: False`, Event (`Warning`), admission denial | A Kubernetes API call of the operator itself failed (reading a CR or a Secret, applying an object, patching a status) — retried. |
 | `ExtraConfigUsed` | advisory | condition `ExtraConfigUsed: True`, Event (`Normal`) | `extraConfig` is rendered: what it sets isn't checked by the operator, only by Angos at load. |
 | `RuleMayFail` | advisory | condition `RuleMayFail: True`, Event (`Normal`) | A CEL rule failed to evaluate on a plausible request: in an access policy, an error is a denial. |
 | `IndexMemoryRisk` | advisory | condition `IndexMemoryRisk: True`, Event (`Normal`) | The index jobs may outgrow the container's memory limit (`global.jobs.index × global.limits.maxIndexEntries`). |

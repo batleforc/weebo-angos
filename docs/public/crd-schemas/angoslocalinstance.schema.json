@@ -270,9 +270,53 @@
       "type": "array"
     },
     "global": {
-      "default": {},
+      "default": {
+        "access": {}
+      },
       "description": "`[global]`: what applies to every repository.",
       "properties": {
+        "access": {
+          "default": {},
+          "description": "The global access policy, checked before any repository's.",
+          "properties": {
+            "admin": {
+              "description": "Who may do anything: named identities, groups or ServiceAccounts\nonly.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "catalog": {
+              "description": "Who may list the catalog, the repositories and their namespaces.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "jobs": {
+              "description": "Who may list, retry and delete background jobs: named identities,\ngroups or ServiceAccounts only.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "metrics": {
+              "description": "Who may scrape `/metrics`.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "rules": {
+              "description": "More CEL rules (`request`, `identity`): a matching one allows.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
         "allowMissingManifestReferences": {
           "description": "`allow_missing_manifest_references`. Angos: true.",
           "nullable": true,
@@ -296,6 +340,29 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "index": {
+          "description": "`index` policy of every repository without its own.",
+          "nullable": true,
+          "properties": {
+            "default": {
+              "description": "What applies when no rule matches; a matching rule does the\nopposite.",
+              "enum": [
+                "Index",
+                "Skip",
+                null
+              ],
+              "nullable": true,
+              "type": "string"
+            },
+            "rules": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
         },
         "jobs": {
           "description": "`max_concurrent_*_jobs`.",
@@ -440,6 +507,20 @@
               "default": false,
               "description": "`enable_manifest_redirect`.",
               "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "retention": {
+          "description": "`retention_policy`: CEL rules on `image` (OR with the\nrepositories').",
+          "nullable": true,
+          "properties": {
+            "rules": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             }
           },
           "type": "object"

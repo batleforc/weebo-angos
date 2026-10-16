@@ -3,6 +3,7 @@
 //! Angos checks it with (`validation`). Whatever the operator decides
 //! without I/O lives here.
 
+pub mod access;
 pub mod config;
 pub mod error;
 pub mod validation;

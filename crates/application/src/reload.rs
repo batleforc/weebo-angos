@@ -54,6 +54,11 @@ struct Fields {
     message: String,
 }
 
+/// What a refusal says when Angos panicked reloading (cel-parser 0.10.1
+/// panics on a CEL syntax error): its watcher is dead, only a restart
+/// brings it back.
+pub const CRASHED: &str = "Angos crashed reloading it (its configuration watcher stopped)";
+
 /// The last reload `lines` report after `written` (exclusive), `None` when
 /// none happened yet.
 pub fn verdict(lines: &[LogLine], written: Timestamp) -> Option<Verdict> {
@@ -61,6 +66,10 @@ pub fn verdict(lines: &[LogLine], written: Timestamp) -> Option<Verdict> {
     let mut apply_error: Option<String> = None;
     for line in lines.iter().filter(|l| l.time > written) {
         let Ok(entry) = serde_json::from_str::<Entry>(&line.text) else {
+            // A panic is printed as plain text, not by `tracing`.
+            if line.text.contains("panicked at") {
+                last = Some(Verdict::Rejected(CRASHED.into()));
+            }
             continue;
         };
         let message = entry.fields.message.as_str();
@@ -311,6 +320,22 @@ mod tests {
         assert_eq!(
             last_error(&lines).as_deref(),
             Some("Failed to bind to 0.0.0.0:8000: \"…\"")
+        );
+    }
+
+    #[test]
+    fn a_panic_while_reloading_is_a_refusal() {
+        let written = at("2026-10-16T10:00:00Z");
+        let lines = [
+            line("2026-10-16T10:00:02Z", "INFO", W, "Configuration change detected, reloading"),
+            LogLine {
+                time: at("2026-10-16T10:00:02Z"),
+                text: "thread 'tokio-rt-worker' (64) panicked at /usr/local/cargo/registry/src/antlr4rust-0.3.0-rc2/src/tree.rs:383:9:".into(),
+            },
+        ];
+        assert_eq!(
+            verdict(&lines, written),
+            Some(Verdict::Rejected(CRASHED.into()))
         );
     }
 

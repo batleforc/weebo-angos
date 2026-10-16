@@ -2,6 +2,7 @@
   "title": "CRD reference",
   "pages": [
     "index",
-    "angoslocalinstance"
+    "angoslocalinstance",
+    "angosrepository"
   ]
 }

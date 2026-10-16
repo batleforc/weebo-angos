@@ -37,6 +37,7 @@ pub use weebo_kit_runtime::Shutdown;
 pub use weebo_kit_runtime::controller::{controller, drive};
 
 pub mod local_instance;
+pub mod repository;
 
 /// Field manager of the status patches, meter and Event reporter name.
 pub const FIELD_MANAGER: &str = "weebo-angos-operator";
@@ -59,6 +60,12 @@ pub struct Ctx {
     pub credentials: Arc<dyn Credentials>,
     pub issuer: Arc<dyn ClusterIssuer>,
     pub keys: Arc<dyn KeyGenerator>,
+    /// The repositories bound to an instance.
+    pub repositories: Arc<dyn application::ports::RepositoryDirectory>,
+    /// The instances a repository may bind to.
+    pub attached: Arc<dyn application::ports::AttachedInstances>,
+    /// Angos's CEL engine.
+    pub cel: Arc<dyn application::ports::CelChecker>,
     /// The operator's own settings.
     pub settings: Settings,
     /// One recorder for the whole process: the kit folds repeated Events

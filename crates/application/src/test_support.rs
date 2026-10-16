@@ -116,3 +116,47 @@ impl StatusLedger for FakeLedger {
         Ok(())
     }
 }
+
+/// A CEL engine that accepts every rule but those it was told about.
+#[derive(Default)]
+pub struct FakeCel {
+    refused: Mutex<Vec<String>>,
+    may_fail: Mutex<Vec<String>>,
+}
+
+impl FakeCel {
+    pub fn refuse(&self, rule: &str) {
+        self.refused.lock().unwrap().push(rule.into());
+    }
+
+    pub fn may_fail(&self, rule: &str) {
+        self.may_fail.lock().unwrap().push(rule.into());
+    }
+}
+
+impl crate::ports::CelChecker for FakeCel {
+    fn check(&self, _: crate::ports::RuleContext, rule: &str) -> crate::ports::RuleVerdict {
+        if self.refused.lock().unwrap().iter().any(|r| r == rule) {
+            crate::ports::RuleVerdict::Refused("refused by the fake".into())
+        } else if self.may_fail.lock().unwrap().iter().any(|r| r == rule) {
+            crate::ports::RuleVerdict::MayFail("fails on the fake".into())
+        } else {
+            crate::ports::RuleVerdict::Ok
+        }
+    }
+}
+
+/// Repositories bound to any instance, as set by the test.
+#[derive(Default)]
+pub struct FakeRepositories(pub Mutex<Vec<crate::repositories::RepositoryView>>);
+
+#[async_trait::async_trait]
+impl crate::ports::RepositoryDirectory for FakeRepositories {
+    async fn bound_to(
+        &self,
+        _instance: &crate::ports::Owner,
+        _selector: &api::local_instance::RepositorySelector,
+    ) -> Result<Vec<crate::repositories::RepositoryView>, String> {
+        Ok(self.0.lock().unwrap().clone())
+    }
+}

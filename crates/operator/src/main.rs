@@ -8,7 +8,10 @@ use std::time::Duration;
 use adapters_inbound::controller::Settings;
 use adapters_inbound::controller::{self, Ctx, Shutdown};
 use adapters_inbound::webhook;
-use adapters_outbound::{KubeClusterIssuer, KubeCredentials, LocalInstanceDirectory, RandomKeys};
+use adapters_outbound::{
+    CelInterpreterChecker, KubeClusterIssuer, KubeCredentials, KubeRepositories,
+    LocalInstanceDirectory, RandomKeys,
+};
 use api::LocalInstance;
 use kube::Client;
 use kube::runtime::events::{Recorder, Reporter};
@@ -60,6 +63,7 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     // the scope can't watch.
     let scope = WatchScope::from_env()?;
     scope.ensure::<LocalInstance>()?;
+    scope.ensure::<api::Repository>()?;
     tracing::info!(
         namespace = ?scope.watched_namespace(),
         selector = ?scope.selector(),
@@ -96,20 +100,31 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     );
     tracing::info!(?allowed_images, default_image = %settings.default_image, "instances");
     let credentials: Arc<KubeCredentials> = Arc::new(KubeCredentials::new(client.clone()));
+    let cel: Arc<CelInterpreterChecker> = Arc::new(CelInterpreterChecker);
+    let repositories = Arc::new(KubeRepositories::new(client.clone()).with_scope(
+        scope.watched_namespace().map(String::from),
+        scope.selector().cloned(),
+    ));
     let admission = Arc::new(adapters_inbound::admission::AngosAdmission {
         credentials: credentials.clone(),
+        cel: cel.clone(),
+        attached: instances.clone(),
+        repositories: repositories.clone(),
         allowed_images: allowed_images.clone(),
         default_image: settings.default_image.clone(),
     });
     let ctx = Arc::new(Ctx {
         client: client.clone(),
-        instances,
+        instances: instances.clone(),
         objects: Arc::new(KubeOwnedObjects::new(
             client.clone(),
             adapters_outbound::workload_settings(allowed_images),
         )),
         logs: Arc::new(KubePodLogs::new(client.clone())),
         credentials,
+        repositories,
+        attached: instances.clone(),
+        cel,
         issuer: Arc::new(KubeClusterIssuer::new(client.clone())),
         keys: Arc::new(RandomKeys),
         settings,
@@ -148,7 +163,10 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     };
 
     tracing::info!("starting controllers");
-    controller::local_instance::run(client.clone(), ctx.clone()).await;
+    tokio::join!(
+        controller::local_instance::run(client.clone(), ctx.clone()),
+        controller::repository::run(client.clone(), ctx.clone()),
+    );
     // Every controller returns once the shutdown signal arrived and its
     // in-flight reconciles finished: hand the lease over right away
     // instead of making the next leader wait out the TTL.

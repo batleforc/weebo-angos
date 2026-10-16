@@ -15,18 +15,22 @@ versions: [v1alpha1]
 # Every kind the operator watches (ClusterRole).
 kinds:
   - angoslocalinstances
+  - angosrepositories
 # The namespaced kinds — all of them, the operator has no cluster-scoped
 # kind: what a team may manage (rbac.namespacedExample), and the watch
 # Role's (watch.namespace).
 namespacedKinds:
   - angoslocalinstances
+  - angosrepositories
 # The operator reads and writes Secrets in every namespace that has an
 # instance, also limited to one namespace: said explicitly.
 clusterSecrets: true
 # Kinds the admission webhook checks (`/validate`): a configuration Angos
-# would refuse, pods the operator doesn't run, a Secret that doesn't opt in.
+# would refuse (its CEL on Angos's engine), pods the operator doesn't run, a
+# Secret that doesn't opt in, a repository prefix that overlaps another.
 admitted:
   - angoslocalinstances
+  - angosrepositories
 # Cluster-wide only: the namespaced rules below, and the labels of the
 # namespaces repositories come from (repositorySelector.namespaces.from:
 # Selector). Limited to one namespace, none of them: they go to

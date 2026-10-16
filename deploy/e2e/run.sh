@@ -47,7 +47,7 @@ dump() {
   step "diagnostics"
   kubectl -n "$OPERATOR_NS" get pods -o wide
   kubectl -n "$OPERATOR_NS" logs -l app.kubernetes.io/name=weebo-angos --tail=200 --prefix --all-containers
-  kubectl -n team-a get angoslocalinstances -o yaml
+  kubectl -n team-a get angoslocalinstances,angosrepositories -o yaml
   kubectl get events -A --sort-by=.lastTimestamp | tail -n 50
 }
 # dump turns errexit off: leave right after it.
@@ -214,6 +214,89 @@ done
 [ "$(field '{.status.bootHash}')" = "$pending" ] || fail "the confirmed storage change never rolled"
 reason_is registry Reconciled
 [ -z "$(field '{.status.pendingBootHash}')" ] || fail "pendingBootHash left after the roll"
+
+# `kind` `name`'s Ready reason, waited for (3 minutes).
+cr_reason_is() {
+  for _ in $(seq 1 90); do
+    got="$(kubectl -n team-a get "$1" "$2" \
+      -o jsonpath='{.status.conditions[?(@.type=="Ready")].reason}' 2>/dev/null || true)"
+    [ "$got" = "$3" ] && return 0
+    sleep 2
+  done
+  fail "$1 $2: Ready reason is ${got:-<none>}, expected $3"
+}
+# An HTTP request to the registry from inside the cluster: its status code.
+registry() {
+  kubectl -n team-a exec e2e-probe -- curl -s -o /dev/null -w '%{http_code}' "$@"
+}
+
+step "repositories: a pull-through of ghcr.io, a scratch space, rules on Angos's engine"
+kubectl apply -f - <<'YAML'
+apiVersion: angos.weebo.io/v1alpha1
+kind: AngosRepository
+metadata:
+  name: ghcr
+  namespace: team-a
+spec:
+  prefix: ghcr
+  access:
+    pull: [anonymous]
+  upstreams:
+    - url: https://ghcr.io
+---
+apiVersion: angos.weebo.io/v1alpha1
+kind: AngosRepository
+metadata:
+  name: scratch
+  namespace: team-a
+spec:
+  prefix: scratch
+  access:
+    pull: [anonymous]
+    push: [anonymous]
+YAML
+cr_reason_is angosrepository ghcr Reconciled
+cr_reason_is angosrepository scratch Reconciled
+kubectl -n team-a run e2e-probe --restart=Never --image=docker.io/curlimages/curl:8.17.0 \
+  --command -- sleep 3600 >/dev/null
+kubectl -n team-a wait pod/e2e-probe --for=condition=Ready --timeout="$WAIT" >/dev/null
+base=http://registry.team-a.svc:8000/v2
+# Pulled through from ghcr.io, anonymously.
+code="$(registry -H 'Accept: application/vnd.oci.image.index.v1+json' \
+  "$base/ghcr/project-angos/angos/manifests/1.12.3")"
+[ "$code" = 200 ] || fail "pull-through of ghcr.io answered $code"
+# A pull-through refuses every push.
+code="$(registry -X POST "$base/ghcr/e2e/blobs/uploads/")"
+case "$code" in 202) fail "a push to the pull-through was accepted" ;; esac
+# The scratch space takes one; a namespace no repository declares doesn't.
+code="$(registry -X POST "$base/scratch/e2e/blobs/uploads/")"
+[ "$code" = 202 ] || fail "a push to scratch answered $code"
+code="$(registry -X POST "$base/undeclared/e2e/blobs/uploads/")"
+case "$code" in 202) fail "a push to an undeclared namespace was accepted" ;; esac
+kubectl -n team-a delete pod e2e-probe --wait=false >/dev/null
+# What would crash Angos's CEL parser, and an overlapping prefix: refused.
+if kubectl apply -f - 2>/dev/null <<'YAML'
+apiVersion: angos.weebo.io/v1alpha1
+kind: AngosRepository
+metadata:
+  name: broken
+  namespace: team-a
+spec:
+  prefix: broken
+  access:
+    rules: ["request.action =="]
+YAML
+then fail "a repository with a broken CEL rule was admitted"; fi
+if kubectl apply -f - 2>/dev/null <<'YAML'
+apiVersion: angos.weebo.io/v1alpha1
+kind: AngosRepository
+metadata:
+  name: overlap
+  namespace: team-a
+spec:
+  prefix: scratch/sub
+YAML
+then fail "an overlapping prefix was admitted"; fi
 
 step "an S3 store, TLS and the cluster's tokens on a second instance"
 kubectl apply -f "$HERE/secure.yaml"

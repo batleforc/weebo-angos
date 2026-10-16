@@ -40,8 +40,9 @@ pub mod paths {
     pub const KUBE_JWKS: &str = "https://kubernetes.default.svc/openid/v1/jwks";
 }
 
-/// What the instance's Secrets hold, read before rendering.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// What the instance's Secrets hold and its rules compile to, resolved
+/// before rendering.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Resolved {
     /// `(access key id, secret key)` of the blob store, when S3.
     pub s3: Option<(String, String)>,
@@ -56,6 +57,15 @@ pub struct Resolved {
     /// The cluster's ServiceAccount issuer, for `auth.kubernetes` without
     /// an explicit one.
     pub cluster_issuer: Option<String>,
+    /// `global.access` compiled and checked (between the operator's own
+    /// rules and the last one).
+    pub global_rules: Vec<String>,
+    /// `global.retention`, checked.
+    pub retention: Option<domain::config::RetentionPolicy>,
+    /// `global.index`, checked.
+    pub index: Option<Policy<domain::config::IndexAction>>,
+    /// The repositories rendered, by prefix.
+    pub repositories: BTreeMap<String, domain::config::Repository>,
 }
 
 /// The two files of an instance and what tells them apart.
@@ -195,6 +205,7 @@ pub fn model(spec: &LocalInstanceSpec, resolved: &Resolved) -> AngosConfig {
     let redirects = g.redirects.clone().unwrap_or_default();
     let ui_enabled = spec.ui.as_ref().is_some_and(|ui| ui.enabled);
     let mut rules = builtin_rules(ui_enabled);
+    rules.extend(resolved.global_rules.iter().cloned());
     rules.push(REPOSITORY_RULE.into());
     config.global = Global {
         max_concurrent_requests: g.max_concurrent_requests,
@@ -216,7 +227,7 @@ pub fn model(spec: &LocalInstanceSpec, resolved: &Resolved) -> AngosConfig {
             default: Some(AccessMode::Deny),
             rules,
         }),
-        retention_policy: None,
+        retention_policy: resolved.retention.clone(),
         immutable_tags: g.immutable_tags,
         immutable_tags_exclusions: g.immutable_tags_exclusions.clone(),
         allow_missing_manifest_references: g.allow_missing_manifest_references,
@@ -224,7 +235,7 @@ pub fn model(spec: &LocalInstanceSpec, resolved: &Resolved) -> AngosConfig {
         event_webhooks: Vec::new(),
         job_queue: None::<JobQueue>,
         scan: None,
-        index: None,
+        index: resolved.index.clone(),
         shutdown_drain_secs: g.shutdown_drain_secs,
         namespace_walk_concurrency: listing.namespace_walk_concurrency,
         listing_read_concurrency: listing.listing_read_concurrency,
@@ -314,6 +325,8 @@ pub fn model(spec: &LocalInstanceSpec, resolved: &Resolved) -> AngosConfig {
         realm: Some(ts.realm.clone()),
         ttl_secs: ts.ttl_secs,
     });
+
+    config.repository = resolved.repositories.clone();
 
     // Observability.
     config.observability = spec.tracing.as_ref().map(|t| Observability {

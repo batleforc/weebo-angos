@@ -8,10 +8,11 @@ export default defineConfig({
   // `AngosLocalInstance` → example named `my-local-instance`.
   kindPrefix: "Angos",
   // Sidebar order follows the order you'd create things in, not the alphabet.
-  order: ["AngosLocalInstance"],
+  order: ["AngosLocalInstance", "AngosRepository"],
   // The guide that explains each kind, linked from its reference page.
   guides: {
     AngosLocalInstance: ["Install via Helm", "/docs/guides/install"],
+    AngosRepository: ["Install via Helm", "/docs/guides/install"],
   },
   // A minimal, realistic `spec` per kind, checked against the schema (every
   // required field present, every key a real field): a renamed field fails
@@ -29,6 +30,11 @@ export default defineConfig({
       auth: {
         tokenService: { realm: "https://registry.example.com/token" },
       },
+    },
+    AngosRepository: {
+      prefix: "dockerhub",
+      access: { pull: ["authenticated"] },
+      upstreams: [{ url: "https://registry-1.docker.io" }],
     },
   },
   // The operator reference pages (content/docs/reference/), generated from

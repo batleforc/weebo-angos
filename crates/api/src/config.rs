@@ -320,6 +320,42 @@ pub struct Global {
     /// `[global.pull_history]`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pull_history: Option<PullHistory>,
+    /// The global access policy, checked before any repository's.
+    #[serde(default)]
+    pub access: GlobalAccess,
+    /// `retention_policy`: CEL rules on `image` (OR with the
+    /// repositories').
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retention: Option<crate::repository::Rules>,
+    /// `index` policy of every repository without its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<crate::repository::ImagePolicy>,
+}
+
+/// The instance's own verbs, with the repositories' vocabulary of subjects.
+/// The operator always lets through the probes, the UI's assets, `/token`
+/// for any identity, and leaves a repository's namespaces to its own
+/// policy; a namespace no repository declares is refused.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GlobalAccess {
+    /// Who may list the catalog, the repositories and their namespaces.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub catalog: Vec<String>,
+    /// Who may list, retry and delete background jobs: named identities,
+    /// groups or ServiceAccounts only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub jobs: Vec<String>,
+    /// Who may do anything: named identities, groups or ServiceAccounts
+    /// only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub admin: Vec<String>,
+    /// Who may scrape `/metrics`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub metrics: Vec<String>,
+    /// More CEL rules (`request`, `identity`): a matching one allows.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<String>,
 }
 
 /// `max_concurrent_*_jobs`.

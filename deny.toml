@@ -8,7 +8,12 @@ all-features = true
 
 [advisories]
 yanked = "deny"
-ignore = []
+ignore = [
+    # `paste` (unmaintained, no vulnerability) comes with cel-interpreter
+    # 0.10.0, pinned on purpose: the operator checks CEL rules on the very
+    # engine Angos 1.12.3 runs (spec 2.6). Moves with Angos's own version.
+    { id = "RUSTSEC-2024-0436", reason = "via cel-interpreter =0.10.0, Angos's CEL engine" },
+]
 
 [licenses]
 allow = [

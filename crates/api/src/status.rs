@@ -1,5 +1,7 @@
 //! The status of the operator's CRDs.
 
+use std::collections::BTreeMap;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 pub use weebo_kit_api::{BoundInstance, Condition};
@@ -81,6 +83,10 @@ pub struct InstanceStatus {
     /// Each pod's answer while a hot layer is being confirmed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pods: Vec<PodReload>,
+    /// The repositories bound to the instance and what became of each
+    /// (`namespace/name`): rendered, or why not.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub repositories: BTreeMap<String, RepositoryRender>,
     /// When the operator last rolled the pods for an unconfirmed reload.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rolled_out_for: Option<String>,
@@ -107,4 +113,35 @@ pub enum PodReloadState {
     Rejected,
     /// The pod started after the layer was written: it read it at start.
     Restarted,
+}
+
+/// What an instance made of a repository bound to it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryRender {
+    pub prefix: String,
+    pub state: RenderState,
+    /// Why it isn't rendered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    /// The repository holding its prefix (`namespace/name`), in conflict.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conflict_with: Option<String>,
+    /// The `metadata.generation` rendered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub enum RenderState {
+    /// In the configuration.
+    Rendered,
+    /// Its prefix overlaps an older repository's.
+    Conflict,
+    /// A Secret it names is missing.
+    SecretMissing,
+    /// A Secret it names doesn't opt in.
+    SecretNotAllowed,
+    /// Its spec can't be rendered.
+    Invalid,
 }
