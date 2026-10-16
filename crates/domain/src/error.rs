@@ -105,10 +105,21 @@ weebo_kit_domain::reason_codes! {
         /// The schedule is suspended (`suspend`, or the instance rolls out
         /// or upgrades).
         MaintenanceSuspended,
-        /// The image tag goes back below `status.version` or jumps more
-        /// than one minor: it needs `angos.weebo.io/approved-upgrade` set
-        /// to that tag.
+        /// The image tag isn't one the operator is tested with, goes back
+        /// below `status.version` or jumps more than one minor: it needs
+        /// `angos.weebo.io/approved-upgrade` set to that tag.
         UpgradeNotAllowed,
+        /// An Angos upgrade runs (`status.upgrade`): the store is scrubbed
+        /// on the old version, the pods roll, the new one checks it. The
+        /// maintenances wait.
+        UpgradeInProgress,
+        /// A step of the upgrade failed (`status.upgrade.failure`): the
+        /// pods stay on the old version. A new value of
+        /// `angos.weebo.io/retry-upgrade` runs it again.
+        UpgradeFailed,
+        /// The upgrade's scrub can't run (an FS store on an `emptyDir`): the
+        /// pods rolled without it.
+        UpgradeUnchecked,
         /// An update would take a CR still carrying the finalizer out of
         /// the operator's label selector (`watch.labelSelector`): refused
         /// at admission.
@@ -150,6 +161,9 @@ weebo_kit_domain::reason_codes! {
         TokenKeyRotated,
         /// An identity's password was rotated (Event only).
         PasswordRotated,
+        /// The instance runs a new Angos version, its store checked (Event
+        /// only).
+        Upgraded,
         /// A maintenance run started (Event only).
         MaintenanceStarted,
         /// The finalizer finished — cleanup done, or the CR force-orphaned
@@ -192,6 +206,8 @@ impl ReasonCode {
             | ReasonCode::StorageCredentialsRotated
             | ReasonCode::IssuerDiscoveryNotBound
             | ReasonCode::DefaultAuthorizationWebhook
+            | ReasonCode::UpgradeUnchecked
+            | ReasonCode::Upgraded
             | ReasonCode::ConfigReloaded
             | ReasonCode::ConfigRolledOut
             | ReasonCode::TokenKeyRotated
@@ -220,6 +236,7 @@ impl ReasonCode {
                 | ReasonCode::UsernameConflict
                 | ReasonCode::DeletionNotAllowed
                 | ReasonCode::UpgradeNotAllowed
+                | ReasonCode::UpgradeFailed
                 // A failed run is never retried: a new one comes from the
                 // schedule, `run-now` or a new spec.
                 | ReasonCode::MaintenanceFailed
@@ -236,6 +253,8 @@ impl ReasonCode {
         ReasonCode::SecretMissing,
         ReasonCode::SecretNotAllowed,
         ReasonCode::UpgradeNotAllowed,
+        ReasonCode::UpgradeFailed,
+        ReasonCode::UpgradeInProgress,
         ReasonCode::BootRejected,
         ReasonCode::WorkloadNotReady,
         ReasonCode::ConfigRejected,

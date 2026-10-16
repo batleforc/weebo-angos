@@ -11,6 +11,7 @@ pub mod reload;
 pub mod render;
 pub mod repositories;
 pub mod rules;
+pub mod upgrade;
 pub mod use_cases;
 pub mod workload;
 

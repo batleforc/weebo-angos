@@ -54,7 +54,10 @@ kubectl get events -A --field-selector reason=InvalidSpec
 | `MaintenanceDeferred` | advisory | condition `MaintenanceDeferred: True`, Event (`Normal`) | Another writing task runs on the instance: this one waits for the next pass. |
 | `MaintenanceRunning` | advisory | condition `MaintenanceRunning: True`, Event (`Normal`) | A run is in progress. |
 | `MaintenanceSuspended` | advisory | condition `MaintenanceSuspended: True`, Event (`Normal`) | The schedule is suspended (`suspend`, or the instance rolls out or upgrades). |
-| `UpgradeNotAllowed` | blocking | `Ready: False`, Event (`Warning`) | The image tag goes back below `status.version` or jumps more than one minor: it needs `angos.weebo.io/approved-upgrade` set to that tag. |
+| `UpgradeNotAllowed` | blocking | `Ready: False`, Event (`Warning`), admission denial | The image tag isn't one the operator is tested with, goes back below `status.version` or jumps more than one minor: it needs `angos.weebo.io/approved-upgrade` set to that tag. |
+| `UpgradeInProgress` | blocking | `Ready: False`, Event (`Warning`) | An Angos upgrade runs (`status.upgrade`): the store is scrubbed on the old version, the pods roll, the new one checks it. The maintenances wait. |
+| `UpgradeFailed` | blocking | `Ready: False`, Event (`Warning`) | A step of the upgrade failed (`status.upgrade.failure`): the pods stay on the old version. A new value of `angos.weebo.io/retry-upgrade` runs it again. |
+| `UpgradeUnchecked` | advisory | condition `UpgradeUnchecked: True`, Event (`Normal`) | The upgrade's scrub can't run (an FS store on an `emptyDir`): the pods rolled without it. |
 | `LeavesWatchScope` | blocking | `Ready: False`, Event (`Warning`) | An update would take a CR still carrying the finalizer out of the operator's label selector (`watch.labelSelector`): refused at admission. |
 | `KubernetesApiError` | blocking | `Ready: False`, Event (`Warning`), admission denial | A Kubernetes API call of the operator itself failed (reading a CR or a Secret, applying an object, patching a status) — retried. |
 | `ExtraConfigUsed` | advisory | condition `ExtraConfigUsed: True`, Event (`Normal`) | `extraConfig` is rendered: what it sets isn't checked by the operator, only by Angos at load. |
@@ -69,5 +72,6 @@ kubectl get events -A --field-selector reason=InvalidSpec
 | `ConfigRolledOut` | advisory | Event (`Normal`) | The pods rolled onto a new startup layer or image (Event only). |
 | `TokenKeyRotated` | advisory | Event (`Normal`) | The token service's key was rotated: every token is invalid (Event only). |
 | `PasswordRotated` | advisory | Event (`Normal`) | An identity's password was rotated (Event only). |
+| `Upgraded` | advisory | Event (`Normal`) | The instance runs a new Angos version, its store checked (Event only). |
 | `MaintenanceStarted` | advisory | Event (`Normal`) | A maintenance run started (Event only). |
 | `Released` | advisory | Event (`Normal`) | The finalizer finished — cleanup done, or the CR force-orphaned (Event only). |

@@ -1977,6 +1977,55 @@ spec:
                 description: When the operator last rolled the pods for an unconfirmed reload.
                 nullable: true
                 type: string
+              upgrade:
+                description: |-
+                  An Angos upgrade in progress (spec 6.8): the store scrubbed on the
+                  old version, the pods rolled, checked on the new one.
+                nullable: true
+                properties:
+                  attempt:
+                    default: 0
+                    description: How many times the step was tried.
+                    format: uint32
+                    minimum: 0.0
+                    type: integer
+                  failure:
+                    description: |-
+                      Why the step failed: it waits for `angos.weebo.io/retry-upgrade`
+                      (a new value), or for the tag to go back.
+                    nullable: true
+                    type: string
+                  from:
+                    description: The tags, from and to.
+                    type: string
+                  job:
+                    description: The step's `Job`, when it runs one.
+                    nullable: true
+                    type: string
+                  retried:
+                    description: The `retry-upgrade` value last retried for.
+                    nullable: true
+                    type: string
+                  since:
+                    description: When the step started (RFC 3339).
+                    type: string
+                  step:
+                    description: The steps of an upgrade, in order.
+                    enum:
+                    - ScrubDryRun
+                    - Scrub
+                    - Rollout
+                    - Verify
+                    - ReconcileIndex
+                    type: string
+                  to:
+                    type: string
+                required:
+                - from
+                - since
+                - step
+                - to
+                type: object
               version:
                 description: The Angos tag the ready pods run.
                 nullable: true

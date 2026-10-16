@@ -209,3 +209,25 @@ impl crate::ports::RepositoryDirectory for FakeRepositories {
         Ok(self.0.lock().unwrap().clone())
     }
 }
+
+/// The `Job`s, by name, as set by the test.
+#[derive(Default)]
+pub struct FakeJobs(pub Mutex<BTreeMap<String, crate::ports::JobState>>);
+
+#[async_trait::async_trait]
+impl crate::ports::Jobs for FakeJobs {
+    async fn job(&self, _: &str, name: &str) -> Result<Option<crate::ports::JobState>, String> {
+        Ok(self.0.lock().unwrap().get(name).cloned())
+    }
+}
+
+/// The maintenances of the namespace, as set by the test.
+#[derive(Default)]
+pub struct FakeMaintenances(pub Mutex<Vec<api::Maintenance>>);
+
+#[async_trait::async_trait]
+impl crate::ports::MaintenanceDirectory for FakeMaintenances {
+    async fn in_namespace(&self, _: &str) -> Result<Vec<api::Maintenance>, String> {
+        Ok(self.0.lock().unwrap().clone())
+    }
+}

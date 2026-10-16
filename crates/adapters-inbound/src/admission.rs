@@ -72,6 +72,19 @@ impl Admission for AngosAdmission {
         )
         .map_err(|f| Denial::new(f.reason, f.message))?;
         let image = application::workload::image(&instance.spec, &self.default_image);
+        // On an update, the object carries the status in place: the
+        // version the pods run.
+        application::upgrade::check(
+            instance.status.as_ref().and_then(|s| s.version.as_deref()),
+            application::workload::tag(&image),
+            instance
+                .metadata
+                .annotations
+                .as_ref()
+                .and_then(|a| a.get(api::annotations::APPROVED_UPGRADE))
+                .map(String::as_str),
+        )
+        .map_err(|m| Denial::new(ReasonCode::UpgradeNotAllowed, m))?;
         for secret in referenced_secrets(&name, namespace, &instance.spec, &image) {
             match self.credentials.consents(namespace, &secret).await {
                 Ok(Some(false)) => {
@@ -244,6 +257,39 @@ mod tests {
         let labelled = FakeCredentials::default();
         labelled.insert("team", "s3", &[]);
         assert_eq!(admit(labelled, s3).await, Ok(()));
+    }
+
+    #[tokio::test]
+    async fn an_update_moves_to_a_tested_version_forward_unless_approved() {
+        let updated = |tag: &str, approved: Option<&str>| -> DynamicObject {
+            let mut annotations = serde_json::Map::new();
+            if let Some(a) = approved {
+                annotations.insert("angos.weebo.io/approved-upgrade".into(), a.into());
+            }
+            serde_json::from_value(json!({
+                "apiVersion": "angos.weebo.io/v1alpha1", "kind": "AngosLocalInstance",
+                "metadata": {"name": "reg", "namespace": "team", "annotations": annotations},
+                "spec": {"storage": {"fs": {}}, "image": {"tag": tag}},
+                "status": {"version": "1.12.3"},
+            }))
+            .unwrap()
+        };
+        let admission = admission(FakeCredentials::default());
+        let admit = |o: DynamicObject| {
+            let admission = &admission;
+            async move {
+                admission
+                    .admit("AngosLocalInstance", "team", &o)
+                    .await
+                    .map_err(|d| d.reason)
+            }
+        };
+        assert_eq!(admit(updated("1.12.3", None)).await, Ok(()));
+        assert_eq!(
+            admit(updated("1.12.2", None)).await,
+            Err(ReasonCode::UpgradeNotAllowed)
+        );
+        assert_eq!(admit(updated("1.12.2", Some("1.12.2"))).await, Ok(()));
     }
 
     #[tokio::test]

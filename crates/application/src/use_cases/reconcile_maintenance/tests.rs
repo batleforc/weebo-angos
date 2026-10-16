@@ -28,25 +28,7 @@ impl AttachedInstances for Instances {
     }
 }
 
-#[derive(Default)]
-struct FakeJobs(Mutex<BTreeMap<String, JobState>>);
-
-#[async_trait::async_trait]
-impl Jobs for FakeJobs {
-    async fn job(&self, _: &str, name: &str) -> Result<Option<JobState>, String> {
-        Ok(self.0.lock().unwrap().get(name).cloned())
-    }
-}
-
-#[derive(Default)]
-struct Others(Mutex<Vec<api::Maintenance>>);
-
-#[async_trait::async_trait]
-impl MaintenanceDirectory for Others {
-    async fn in_namespace(&self, _: &str) -> Result<Vec<api::Maintenance>, String> {
-        Ok(self.0.lock().unwrap().clone())
-    }
-}
+use crate::test_support::{FakeJobs, FakeMaintenances as Others};
 
 struct World {
     owner: Owner,

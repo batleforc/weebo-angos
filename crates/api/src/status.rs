@@ -53,6 +53,10 @@ pub struct InstanceStatus {
     /// found atomic.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conditional_writes: Option<ConditionalWrites>,
+    /// An Angos upgrade in progress (spec 6.8): the store scrubbed on the
+    /// old version, the pods rolled, checked on the new one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upgrade: Option<Upgrade>,
     /// The hash of the startup layer the pods run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub boot_hash: Option<String>,
@@ -106,6 +110,48 @@ pub struct InstanceStatus {
     /// When the operator last rolled the pods for an unconfirmed reload.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rolled_out_for: Option<String>,
+}
+
+/// An upgrade's progress.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Upgrade {
+    /// The tags, from and to.
+    pub from: String,
+    pub to: String,
+    pub step: UpgradeStep,
+    /// When the step started (RFC 3339).
+    pub since: String,
+    /// The step's `Job`, when it runs one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job: Option<String>,
+    /// Why the step failed: it waits for `angos.weebo.io/retry-upgrade`
+    /// (a new value), or for the tag to go back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
+    /// How many times the step was tried.
+    #[serde(default)]
+    pub attempt: u32,
+    /// The `retry-upgrade` value last retried for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retried: Option<String>,
+}
+
+/// The steps of an upgrade, in order.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+pub enum UpgradeStep {
+    /// `angos scrub -d` on the old version: what it would repair.
+    ScrubDryRun,
+    /// `angos scrub` on the old version, no other writer running.
+    Scrub,
+    /// The pods roll onto the new version.
+    Rollout,
+    /// `angos scrub -d` on the new version: the store reads as it expects.
+    Verify,
+    /// `angos reconcile index` on the new version.
+    ReconcileIndex,
 }
 
 /// Angos's own probe of the store (`create_if_absent` twice), read in the
