@@ -1753,6 +1753,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "importer"
+version = "0.1.0-alpha.2"
+dependencies = [
+ "adapters-outbound",
+ "anyhow",
+ "api",
+ "application",
+ "clap",
+ "k8s-openapi",
+ "kube",
+ "serde_json",
+ "serde_norway",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -6,6 +6,7 @@
     "guides/install",
     "guides/scaling-and-upgrades",
     "guides/monitoring",
+    "guides/migrate-from-weebo-si",
     "---Reference---",
     "...crds",
     "reference"

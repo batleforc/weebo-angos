@@ -1,0 +1,429 @@
+repo: ""
+project: ""
+branch: ""
+
+angos:
+  enabled: true
+  s3Url: "https://s3-main.weebo.poc"
+  image:
+    registry: ghcr.io/project-angos/angos
+    # renovate: datasource=docker depName=ghcr.io/project-angos/angos
+    tag: 1.12.2
+  dns: registry.pkg.weebo.poc
+  # `[auth.token_service]`, whose secret_key comes from Vault and whose realm
+  # is built from `dns` above. The ceiling angos enforces is 86400.
+  tokenService:
+    ttlSecs: 3600
+  # Registries, declared here and nowhere else. Each key is the namespace
+  # PREFIX clients address, so `hub` serves `hub/library/alpine` and `weebo`
+  # serves `weebo/whatever`. Keys must not overlap -- `team` and `team/app`
+  # together are refused at startup, since one is a prefix of the other.
+  #
+  # `upstreams` present makes it a pull-through cache of those registries, and
+  # angos refuses pushes to it whatever the policy says. Absent makes it a
+  # local registry that accepts them. That is the entire difference; everything
+  # else below is identical between the two.
+  #
+  # An upstream needing credentials or mTLS cannot be declared here: those keys
+  # would land in config.toml, which is not a secret. They belong beside the S3
+  # credentials in templates/angos/secret.yaml, whose file the server merges
+  # over this one -- but a whole `[[upstream]]` entry has to live in ONE file,
+  # so such a repository moves there entirely.
+  #
+  # `access` is per verb, and each verb lists SUBJECTS:
+  #   provider:<name>   any identity `[auth.oidc.<name>]` validated -- `weebo`
+  #                     is the browser and the CLI, `kube` is a workload's
+  #                     service-account token
+  #   identity:<name>   a Basic `[auth.identity.<name>]`, which on this
+  #                     instance is only ever the scanner
+  #   group:<name>      an identity whose `groups` claim carries it, which only
+  #                     the `weebo` provider emits
+  #   namespace:<ns>    any workload of one Kubernetes namespace
+  #   serviceaccount:<ns>:<name>
+  #                     one workload identity exactly
+  #   anonymous         no identity at all, for a registry meant to be public
+  #
+  # The namespace and serviceaccount forms read the `sub` a projected token
+  # carries, `system:serviceaccount:<namespace>:<name>`, so they say who may
+  # pull far more precisely than `provider:kube`, which is every pod in the
+  # cluster:
+  #
+  #   prod-images:
+  #     access:
+  #       pull: ["namespace:prod", "serviceaccount:ci:builder"]
+  #       push: ["serviceaccount:ci:builder"]
+  #
+  # Verified that `namespace:prod` refuses a pod of `production` -- the match
+  # keeps the trailing colon -- and that `serviceaccount:ci:builder` refuses
+  # another account of the same namespace.
+  #
+  # The verbs are pull, browse (the UI's per-image views), push and delete. A
+  # verb nobody is listed for is denied, and a repository with no `access` at
+  # all is unreachable: its policy grants nothing and the global one defers to
+  # it. That is deliberate -- adding a registry and forgetting who may use it
+  # fails closed rather than inheriting someone else's rights.
+  #
+  # `scan` is the per-registry switch of `angos.scanner` below, off everywhere
+  # by default. It is the ONLY place scanning is turned on: the scanner
+  # deployment existing scans nothing on its own. Setting it grants the scanner
+  # identity `get-manifest` and `get-blob` on that registry and nothing else --
+  # written for you in the rendered policy, since a scan that cannot pull is a
+  # job that only ever dead-letters.
+  #
+  # On a pull-through cache it means one scan per upstream digest a cache miss
+  # stores, which on `hub` is every image anyone pulls through it. Weigh the
+  # scanner time before turning it on there; the local registry is the cheap
+  # and useful one.
+  repositories:
+    hub:
+      scan: false
+      upstreams:
+        - "https://registry-1.docker.io"
+      access:
+        pull: ["provider:weebo", "provider:kube"]
+        browse: ["provider:weebo"]
+    ghcr:
+      scan: false
+      upstreams:
+        - "https://ghcr.io"
+      access:
+        pull: ["provider:weebo", "provider:kube"]
+        browse: ["provider:weebo"]
+    # Che workspace images (che-code, project-clone, the che--traefik
+    # sidecar), pulled as registry.pkg.weebo.poc/quay/<org>/<image>. Only
+    # those: cilium, cert-manager and argocd stay on quay.io directly, since
+    # angos itself needs them up to serve anything.
+    quay:
+      scan: false
+      upstreams:
+        - "https://quay.io"
+      access:
+        pull: ["provider:weebo", "provider:kube"]
+        browse: ["provider:weebo"]
+    # The local one: what this cluster builds and pushes. Workloads pull it
+    # with their own service-account token, humans push it, and only an admin
+    # removes anything.
+    weebo:
+      scan: false
+      access:
+        pull: ["provider:weebo", "provider:kube"]
+        browse: ["provider:weebo"]
+        push: ["provider:weebo"]
+        delete: ["group:weebo_admin"]
+
+  # The rules that belong to no registry, because the actions they cover carry
+  # no namespace and so never reach a repository policy. Same subject
+  # vocabulary as above.
+  #
+  # Everything else namespaced is decided by the repository covering it, and a
+  # namespace no repository declares is denied outright: the global policy ends
+  # on `has_repository_policy()`, which admits a request only when a repository
+  # will decide it. Pushing to an undeclared prefix therefore fails until that
+  # registry exists in the values above, which is the point -- registries are
+  # declared, not discovered.
+  policy:
+    # The registry-wide listings the web UI calls to render its home page.
+    browse: ["provider:weebo"]
+    # The job queue behind the UI's jobs view, including retrying and deleting.
+    jobs: ["group:weebo_admin"]
+    # Admin actions that are not repository-specific, like the `/v2/_catalog` listing
+    admin: ["group:weebo_admin"]
+
+  # Vulnerability scanning, off everywhere by default. A manifest pushed into a
+  # repository carrying `scan: true` enqueues a job; the job asks the service
+  # below for a SARIF report and attaches it to the image as an OCI referrer.
+  # It then lists under /v2/<name>/referrers/<digest>, shows on the manifest's
+  # Vulnerabilities tab with its severity counts, and is reclaimed by `prune`
+  # with the image it describes. angos never blocks a pull on it -- enforcement
+  # is admission's job, where the same referrers are read.
+  #
+  # The registry runs no scanner itself. This is a SECOND deployment of the
+  # same binary under `scanner <engine>`, and it PULLS each image back out of
+  # the registry to analyse it. That pull is the whole reason the scanner needs
+  # a credential of its own, and the reason that credential is the one piece of
+  # this that is not generated by terraform -- see `username` below.
+  #
+  # `[global.job_queue]` is deliberately not configured on this instance, so
+  # the server drains the scan queue in-process and no `angos worker`
+  # deployment is needed. The flip side, measured: a job retries five times
+  # over about five seconds and then dead-letters, so a push landing while the
+  # scanner is still starting loses its report until `angos reconcile scan`
+  # re-enqueues it. That window is real on a cold start -- grype downloads its
+  # database before it opens the listener, which took ~90s here on an empty
+  # cache -- which is why `cache` below is a volume and not an emptyDir.
+  scanner:
+    enabled: false
+    # `trivy` or `grype`. It picks both the image tag suffix and the
+    # subcommand, and nothing else in this chart changes with it.
+    #
+    # trivy is the default because it is the one that works from configuration
+    # alone. Measured on 1.9.2: the `[scanner.registry]` username and password
+    # never reach grype, which then pulls anonymously and fails every scan with
+    # `UNAUTHORIZED: Access denied` from this registry's own policy. The
+    # `GRYPE_REGISTRY_AUTH_*` environment in templates/angos/scanner.yaml is
+    # that gap's workaround and is set for grype only; drop it once upstream
+    # passes the credentials itself.
+    #
+    # Beyond that they differ in how they parallelise: trivy locks its cache
+    # and scans one image at a time whatever `maxConcurrentScans` says, so
+    # `replicas` is the only way to scan several images at once with it, while
+    # grype scans concurrently inside one replica. trivy refreshes its database
+    # during a scan, grype once a day at startup.
+    engine: trivy
+    # A StatefulSet, not a Deployment, because each replica needs its own cache
+    # volume: the two scanners lock theirs and neither is safe to share.
+    replicas: 1
+    # The listener, and the port `[global.scan].url` names. The Service in
+    # front of it round-robins across the replicas.
+    port: 8766
+    # Scans in flight per replica. Ignored by trivy, which says so in its logs
+    # at startup rather than silently.
+    maxConcurrentScans: 2
+    # Scan jobs the REGISTRY runs at once, `[global].max_concurrent_scan_jobs`.
+    # The other half of the pair above: this bounds how many requests the
+    # registry has outstanding, that one how many the service will run.
+    maxConcurrentScanJobs: 2
+    # Bound on one scan request, pull and analysis included. The job fails and
+    # retries past it, so it has to be longer than the slowest image, not the
+    # average one.
+    timeoutSecs: 600
+    # The Basic identity the scanner pulls with, `[auth.identity.<name>]`. It
+    # must NOT name an `[auth.oidc.*]` provider -- `weebo` or `kube` here --
+    # since a Basic credential naming a provider is read as that provider's
+    # token instead, and angos refuses to start on the collision.
+    #
+    # Basic, and not a service-account token like every other workload here,
+    # because `[scanner.registry]` takes a static password and nothing rotates
+    # it: a projected token would be stale within the hour. The password lives
+    # in Vault under `mv/angos/scanner`, beside the argon2id hash of itself the
+    # registry side needs; 2.terra/vault/terra-map/angos.tf writes both, so
+    # this needs no bootstrap step of its own.
+    username: scanner
+    # What the scanner pulls from. Empty means `https://<angos.dns>`, the
+    # public name, which is also what `[auth.token_service].realm` advertises:
+    # the 401 the scanner gets sends it to that absolute URL for a token
+    # whatever host it started from, so pointing this at the in-cluster Service
+    # would only split the two.
+    registryUrl: ""
+    # The scanner database, under XDG_CACHE_HOME=/cache in the image. A volume
+    # rather than an emptyDir because grype refuses to start without a database
+    # and downloads one first, so an ephemeral cache turns every restart into a
+    # multi-minute outage of the scan queue.
+    cache:
+      size: 5Gi
+      storageClassName: longhorn
+    # A scan forks the scanner binary, which unpacks the image it pulled. The
+    # memory ceiling is the one that matters: a large image cataloged by trivy
+    # is what gets OOMKilled, and an OOMKill reads as a failed job.
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "256Mi"
+      limits:
+        memory: "2Gi"
+
+  ui:
+    enabled: true
+    nativeAuth: true
+    scope: "openid email profile offline_access groups"
+
+  # Browser SSO for the web UI. angos itself has no login flow of any kind: the
+  # UI is a Svelte app with no auth code, and the server only ever reads an
+  # `Authorization` header or a client certificate -- never a cookie. With
+  # `[auth.token_service]` configured every 401 answers with a Bearer
+  # challenge, which no browser knows how to satisfy either, so a browser
+  # identity has to be handed to angos by something in front of it.
+  #
+  # oauth2-proxy is that something: it runs the authorization-code flow against
+  # the SAME Authentik application `docker login` uses, then forwards the ID
+  # token as `Authorization: Bearer`. angos validates it with the
+  # `[auth.oidc.weebo]` block it already has -- same issuer, same audience --
+  # so the browser and the CLI end up as the same kind of identity and one set
+  # of CEL rules covers both.
+  #
+  # It is NOT on the path of `docker` or the kubelet: the IngressRoute only
+  # sends a request through it when the request carries this proxy's session
+  # cookie, or when it is not an API path at all. See templates/angos/ingress.yaml.
+  oauth2Proxy:
+    enabled: false
+    image:
+      registry: quay.io/oauth2-proxy/oauth2-proxy
+      # renovate: datasource=docker depName=quay.io/oauth2-proxy/oauth2-proxy
+      tag: v7.15.4
+    # The cookie the ingress splits on, so a rename here is a rename in the
+    # IngressRoute rule -- they are read from the same value on purpose.
+    # oauth2-proxy chunks oversized cookies into `<name>_0`, `<name>_1`, which
+    # is why the rule matches a prefix rather than an exact name.
+    cookieName: _angos_ui
+    # Must stay UNDER the Authentik provider's access-token validity, which is
+    # `hours=1` on this instance (read off the API, not the documented
+    # default): past it the ID token in the session is expired and angos
+    # rejects it. Below that, oauth2-proxy silently swaps in a fresh one using
+    # the refresh token, which is what `offline_access` in the provider's
+    # property mappings is for. Half the validity leaves room for a refresh
+    # that fails once.
+    cookieRefresh: 30m
+    # How long a browser session survives without re-authenticating at all.
+    cookieExpire: 8h
+    # A page that hands the logged-in user their own ID token, so a `docker
+    # login` needs neither the Vault client secret `task angos:token` reads nor
+    # a device-code round trip. Served by oauth2-proxy itself from a ConfigMap
+    # (`--upstream=file://`), so it costs no deployment and no image.
+    #
+    # It works because `--set-authorization-header` makes /oauth2/auth answer
+    # with `Authorization: Bearer <id_token>`, which same-origin JavaScript can
+    # read. That flag also echoes the header on every proxied response, so the
+    # token is readable by any script running on this origin. That is not a new
+    # exposure -- a page whose purpose is to hand the token to JavaScript has
+    # already accepted it -- but it is the reason this is a flag you can turn
+    # off rather than something always on.
+    tokenPage:
+      enabled: true
+      # Trailing slash required: oauth2-proxy maps a file upstream onto a path
+      # PREFIX. `/token` (no slash) is angos' own token endpoint, hence a name
+      # that cannot be mistaken for it.
+      path: /me/
+
+    # CIDRs allowed to set X-Forwarded-*. Empty means every caller is believed,
+    # which oauth2-proxy warns about at startup: the redirect URL is pinned
+    # above so a spoofed header cannot move the login anywhere, but it can lie
+    # about the client IP in the logs. Set it to the pod CIDR (Traefik is the
+    # only legitimate caller of this Service) to close that.
+    trustedProxyCidrs: []
+
+  # Lets a workload authenticate with the projected service-account token the
+  # cluster already mints for it, instead of a static imagePullSecret that
+  # never expires and lives in git or Vault.
+  #
+  # A pod calling angos itself (ORAS, a CI job, anything reading its own token
+  # off disk) works with only what is below. An image PULL does not: the
+  # kubelet pulls before the pod filesystem exists, so it needs a credential
+  # provider plugin installed on every node and named in the kubelet config.
+  # On Talos that is a machine-config change, not something this repo can make.
+  kubeOidc:
+    enabled: true
+    # The `iss` of a projected token on THIS cluster, read off
+    # /.well-known/openid-configuration -- and NOT the
+    # "https://kubernetes.default.svc" the upstream doc shows, which is only
+    # right for a cluster whose --service-account-issuer says so. A mismatch
+    # here is silent: tokens simply never validate.
+    #
+    # It is the apiserver's advertised address, which is also the single
+    # endpoint behind the in-cluster `kubernetes` Service, so angos reaches it
+    # over the same path a pod always uses. Its certificate verifies against
+    # the cluster CA below.
+    issuer: "https://37.187.255.5:6443"
+    # What a workload must ask for in `serviceAccountToken.audience`, and what
+    # angos requires: a token minted for the apiserver itself is rejected.
+    audience: angos
+    # Reading the cluster's JWKS takes the system:service-account-issuer-discovery
+    # role -- both discovery endpoints answer 401 to an anonymous caller here,
+    # measured. Rather than granting that role to system:unauthenticated, which
+    # publishes the signing keys to anyone who can reach the apiserver, angos
+    # gets an identity of its own and presents its own service-account token.
+    serviceAccountName: angos
+    # The node half: the kubelet pulls before the pod filesystem exists, so it
+    # cannot read a projected token and asks a credential provider plugin
+    # instead. This installs that plugin; `machine.kubelet.extraArgs` in
+    # 1.pulu-init/main.go points the kubelet at it.
+    #
+    # ORDER MATTERS AND IS NOT RECOVERABLE BY RETRY. A kubelet given
+    # --image-credential-provider-config or --image-credential-provider-bin-dir
+    # refuses to START when the file or the binary they name is missing, so
+    # this DaemonSet has to have run on every node before that machine config
+    # is applied. On this cluster that node is also the control plane.
+    #
+    # Verify before applying the Pulumi change:
+    #   task t -- -n <node> list /var/lib/kubelet/credential-providers
+    credentialProvider:
+      enabled: true
+      # Its own namespace, and not by taste. Talos ships an AdmissionConfiguration
+      # that enforces the `baseline` Pod Security level cluster-wide, exempting
+      # only kube-system, and baseline forbids both hostPath volumes and a
+      # privileged container:
+      #   pods "..." is forbidden: violates PodSecurity "baseline:latest":
+      #   hostPath volumes (volume "host"), privileged (container "install" ...)
+      # A namespace label overrides that default, so the exception is written
+      # where it applies and covers one installer instead of the registry, the
+      # proxy and the maintenance jobs that share the `angos` namespace.
+      #
+      # `kubectl apply --dry-run=server` only reported the `restricted` WARNING
+      # here, never the `baseline` refusal, so a clean dry run says nothing
+      # about admission on this cluster.
+      namespace: angos-node
+      # Pinned to the registry's own version: the plugin and the server speak
+      # the same `[auth.oidc]` section names, and upstream calls this contrib
+      # binary experimental, so drifting them apart buys nothing.
+      # renovate: datasource=github-releases depName=project-angos/angos
+      version: v1.8.0
+      # sha256 of the release asset, checked against the cosign bundle
+      # published beside it (keyless, identity project-angos/angos): the
+      # installer refuses to write a binary it cannot match.
+      sha256:
+        amd64: "744bfa7b7556613f0fedfa9bb9b155f2a7bdeb67deff26c9ff8dd7068769f2f9"
+        # Left empty on purpose: every node here is amd64, and an unchecked
+        # arm64 install would be a download on trust. Fill it before adding an
+        # arm64 node, or that node's installer fails loudly.
+        arm64: ""
+      # Under /var, which Talos mounts `rw,nosuid,nodev` with NO `noexec` --
+      # verified on the node, and the reason this needs no Talos system
+      # extension. The blessed path, /usr/local/lib/kubelet/credentialproviders,
+      # is baked into the image and would mean building an installer image and
+      # rebooting.
+      binDir: /var/lib/kubelet/credential-providers
+      installerImage: "alpine:3.22"
+
+  # Storage maintenance, as two CronJobs. Not optional in practice: a delete
+  # answers 202 and removes the RECORD, leaving the blob bytes in the bucket
+  # until a scrub sweep reclaims them. Without this the S3 bill only grows.
+  #
+  # Both commands are designed to run against a live server -- no shutdown, no
+  # read-only window. Scrub confirms an inconsistency on a re-read before
+  # repairing it and age-gates every reclaim behind `gc_grace_secs`, so a push
+  # in flight reads as live rather than as garbage.
+  maintenance:
+    enabled: true
+    # Kubernetes reads `schedule` as UTC unless a zone is named here (a tzdata
+    # name, "Europe/Paris"). Left empty because 03:00 UTC is already the quiet
+    # hour for this cluster, and a DST-shifting zone makes "did it run?" harder
+    # to answer than it is worth.
+    timeZone: ""
+    jobs:
+      # Structural: walks every key in both stores, repairs derivable state,
+      # reclaims orphan blobs, and quarantines what it does not recognise into
+      # `_lost_and_found/` rather than deleting it. Inspect that prefix after a
+      # version bump -- an upgrade is exactly when a key shape it has never
+      # seen shows up. `--delete-unknown` exists and is not set on purpose.
+      #
+      # Run it from the same angos version as the server, which the shared
+      # `image.tag` above guarantees.
+      scrub:
+        enabled: true
+        schedule: "0 3 * * *"
+        # e.g. ["--dry-run"] to see a run before trusting it, or
+        # ["--concurrency", "32"] once the store is large.
+        args: []
+      # Config and time: enforces retention policies, clears namespaces no
+      # `[repository]` owns any more, and reclaims upload-lifecycle leftovers
+      # older than its window (`-u`, default 1h -- raise it above the longest
+      # push you expect, since it is what shields an in-flight one).
+      #
+      # After scrub, not before, mirroring upstream: prune makes decisions
+      # about a store scrub has already made consistent, and the grace gate
+      # means bytes it frees are reclaimed by the next night's scrub anyway.
+      prune:
+        enabled: true
+        schedule: "30 3 * * *"
+        args: []
+
+  # The internal CA, mounted beside the system store rather than over
+  # /etc/ssl/certs the way the `inject-certs` Kyverno policy does: angos has to
+  # reach s3-main.weebo.poc (signed by the internal CA) as well as
+  # registry-1.docker.io / ghcr.io (public roots), and the Bundle carries both.
+  caTrust:
+    enabled: true
+    # The trust-manager Bundle's ConfigMap target, replicated into every
+    # namespace. The file lands at <mountPath>/<bundleKey>.
+    bundleConfigMap: weebo.poc
+    bundleKey: main-ca.crt
+    mountPath: /etc/ssl/weebo

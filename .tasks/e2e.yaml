@@ -46,6 +46,8 @@ tasks:
     desc: "Deploy cert-manager and the chart into the kind cluster (upgrading from the last published chart when there is one), then run the smoke (usage: task e2e:run [UPGRADE_FROM=none|X.Y.Z])"
     env:
       IMAGE: "{{.IMAGE}}"
+      # The importer runs from the operator image.
+      ENGINE: "{{.ENGINE}}"
       # Empty: the latest published chart; `none`: skip the upgrade test.
       UPGRADE_FROM: "{{.UPGRADE_FROM}}"
     cmds:
