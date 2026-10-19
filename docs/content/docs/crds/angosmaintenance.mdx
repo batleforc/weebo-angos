@@ -40,14 +40,36 @@ spec:
 
 | Field | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `instanceRef` | `object` | no |  | The instance, of this namespace: unset, its only one. |
-| `params` | `object` | no | `{"deleteUnknown":false,"dryRun":true,"force":false,"uploadTimeout":"24h"}` |  |
+| [`instanceRef`](#spec.instanceRef) | `object` | no |  | The instance, of this namespace: unset, its only one. |
+| [`params`](#spec.params) | `object` | no | `{"deleteUnknown":false,"dryRun":true,"force":false,"uploadTimeout":"24h"}` |  |
 | `resources` | `object` | no |  | The Job's resources (the tasks spawn up to 64 threads; `concurrency` bounds the work). |
 | `schedule` | `string` | no |  | A 5-field cron expression, in UTC (`15 * * * *`). Unset: one run. A time missed (the operator down) is not caught up. |
 | `suspend` | `boolean` | no | `false` | No run while true. |
-| `task` | `string` | yes |  |  |
-| `timeoutSeconds` | `integer` | no | `3600` | The Job's `activeDeadlineSeconds`. |
+| `task` | `string` | yes |  | Values: `"Scrub"`, `"Prune"`, `"ReconcileReplication"`, `"ReconcileScan"`, `"ReconcileIndex"` |
+| `timeoutSeconds` | `integer` | no | `3600` | The Job's `activeDeadlineSeconds`.<br /><br />Constraints: `minimum: 60` |
 | `ttlSecondsAfterFinished` | `integer` | no | `86400` | How long a finished Job is kept. |
+
+### `spec.instanceRef` [#spec.instanceRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `kind` | `string` | no |  | The kind of instance a reference designates.<br /><br />Values: `"Instance"`, `"LocalInstance"` |
+| `name` | `string` | yes |  | `metadata.name` of the instance. |
+| `namespace` | `string` | no |  | Namespace of a `LocalInstance`. Defaults to this object's own; required on a cluster-scoped object. Another namespace's local instance must share itself with this one (its `sharedWith`). |
+
+**Rules**
+
+- namespace only applies to kind LocalInstance — `!has(self.namespace) || !has(self.kind) || self.kind == 'LocalInstance'`
+
+### `spec.params` [#spec.params]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `concurrency` | `integer` | no |  | `--concurrency`.<br /><br />Constraints: `minimum: 1` |
+| `deleteUnknown` | `boolean` | no | `false` | Scrub: `--delete-unknown` (delete instead of quarantining). |
+| `dryRun` | `boolean` | no | `true` | `-d`: report only. **True unless set to false.** |
+| `force` | `boolean` | no | `false` | Reconcile scan/index: `--force`. |
+| `uploadTimeout` | `string` | no | `"24h"` | Prune: `-u`, the age of the upload leftovers reclaimed. |
 
 ## Build a manifest
 

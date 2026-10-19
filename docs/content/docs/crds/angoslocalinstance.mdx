@@ -43,40 +43,750 @@ spec:
 | Field | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
 | `affinity` | `object` | no |  |  |
-| `auth` | `object` | no | `{}` | `[auth]`: who may authenticate. |
-| `cache` | `object` | no |  | `[cache]`: unset, Angos caches in memory. |
+| [`auth`](#spec.auth) | `object` | no | `{}` | `[auth]`: who may authenticate. |
+| [`cache`](#spec.cache) | `object` | no |  | `[cache]`: unset, Angos caches in memory. |
 | `env` | `object[]` | no |  | Rarely needed (Angos reads no secret from its environment). Secrets read here must be labelled `angos.weebo.io/credential: "true"`; `RUST_LOG` is the operator's (`logLevel`). |
 | `envFrom` | `object[]` | no |  |  |
-| `eventWebhooks` | `object[]` | no |  | `[event_webhook.<name>]`: told of pushes, pulls and deletions. |
+| [`eventWebhooks`](#spec.eventWebhooks) | `object[]` | no |  | `[event_webhook.<name>]`: told of pushes, pulls and deletions.<br /><br />Constraints: `maxItems: 32` |
 | `extraConfig` | `object` | no |  | Keys of Angos's configuration no typed field renders, merged last into the hot file. Checked by Angos only (advisory `ExtraConfigUsed`). |
 | `extraVolumeMounts` | `object[]` | no |  |  |
 | `extraVolumes` | `object[]` | no |  | CA bundles and other files: no `hostPath`; Secrets labelled `angos.weebo.io/credential: "true"`. |
-| `global` | `object` | no | `{"access":{}}` | `[global]`: what applies to every repository. |
-| `image` | `object` | no |  | The Angos image. Its repository must be one the operator allows (`managedInstances.allowedImages`). |
-| `imagePullSecrets` | `object[]` | no |  |  |
+| [`global`](#spec.global) | `object` | no | `{"access":{}}` | `[global]`: what applies to every repository. |
+| [`image`](#spec.image) | `object` | no |  | The Angos image. Its repository must be one the operator allows (`managedInstances.allowedImages`). |
+| [`imagePullSecrets`](#spec.imagePullSecrets) | `object[]` | no |  |  |
 | `logLevel` | `string` | no | `"info"` | `RUST_LOG` of the pods (e.g. `info`, `warn,angos=debug`); the operator always adds `angos::configuration::watcher=info`, the reload messages it reads. |
-| `networkPolicy` | `object` | no |  | A `NetworkPolicy` around the pods: unset, none. |
-| `nodeSelector` | `object` | no |  |  |
-| `podAnnotations` | `object` | no |  |  |
-| `podLabels` | `object` | no |  |  |
+| [`networkPolicy`](#spec.networkPolicy) | `object` | no |  | A `NetworkPolicy` around the pods: unset, none. |
+| `nodeSelector` | `map[string]` | no |  |  |
+| `podAnnotations` | `map[string]` | no |  |  |
+| `podLabels` | `map[string]` | no |  |  |
 | `podSecurityContext` | `object` | no |  | Unset: non-root 65534 (the image's user), seccomp `RuntimeDefault`. |
 | `priorityClassName` | `string` | no |  |  |
-| `pruneLock` | `object` | no | `{"windowHours":24}` | The prune lock (spec 6.6): no `AngosMaintenance` prune runs while a repository was released less than `windowHours` ago (its data goes at the next prune: time to notice and recreate it). |
-| `reload` | `object` | no | `{"mode":"Hot","onUnconfirmed":"Wait","timeoutSeconds":180}` | How a new configuration reaches the pods. |
-| `replicas` | `integer` | no | `1` | The server's pods. More than one needs an S3 store and `worker.enabled`, and runs once Angos found the store's conditional writes atomic (`status.conditionalWrites`); until then, one. |
-| `repositorySelector` | `object` | no |  | Which `AngosRepository`s (and `AngosIdentity`s) the instance serves, and from which namespaces. |
+| [`pruneLock`](#spec.pruneLock) | `object` | no | `{"windowHours":24}` | The prune lock (spec 6.6): no `AngosMaintenance` prune runs while a repository was released less than `windowHours` ago (its data goes at the next prune: time to notice and recreate it). |
+| [`reload`](#spec.reload) | `object` | no | `{"mode":"Hot","onUnconfirmed":"Wait","timeoutSeconds":180}` | How a new configuration reaches the pods. |
+| `replicas` | `integer` | no | `1` | The server's pods. More than one needs an S3 store and `worker.enabled`, and runs once Angos found the store's conditional writes atomic (`status.conditionalWrites`); until then, one.<br /><br />Constraints: `minimum: 0` |
+| [`repositorySelector`](#spec.repositorySelector) | `object` | no |  | Which `AngosRepository`s (and `AngosIdentity`s) the instance serves, and from which namespaces. |
 | `resources` | `object` | no |  | Unset: requests 100m CPU / 256Mi, limit 1Gi. |
-| `scan` | `object` | no |  | `[global.scan]`: the scanner (deployed apart) and the global scan policy. The scan queue's jobs call it. |
+| [`scan`](#spec.scan) | `object` | no |  | `[global.scan]`: the scanner (deployed apart) and the global scan policy. The scan queue's jobs call it. |
 | `securityContext` | `object` | no |  | Unset: read-only root filesystem, no capability, no escalation. |
-| `server` | `object` | no | `{"port":8000}` | `[server]`: the listener. |
-| `service` | `object` | no | `{"port":8000,"type":"ClusterIP"}` |  |
-| `serviceAccount` | `object` | no | `{"create":true}` |  |
-| `storage` | `object` | yes |  | Where Angos keeps blobs and metadata. Read at startup only: a change of the store waits for the annotation `angos.weebo.io/confirm-storage` (set to `status.pendingBootHash`), then rolls the pods. Pointing an instance at another, empty store makes it serve an empty registry: no data moves. |
+| [`server`](#spec.server) | `object` | no | `{"port":8000}` | `[server]`: the listener. |
+| [`service`](#spec.service) | `object` | no | `{"port":8000,"type":"ClusterIP"}` |  |
+| [`serviceAccount`](#spec.serviceAccount) | `object` | no | `{"create":true}` |  |
+| [`storage`](#spec.storage) | `object` | yes |  | Where Angos keeps blobs and metadata. Read at startup only: a change of the store waits for the annotation `angos.weebo.io/confirm-storage` (set to `status.pendingBootHash`), then rolls the pods. Pointing an instance at another, empty store makes it serve an empty registry: no data moves. |
 | `terminationGracePeriodSeconds` | `integer` | no |  | Unset: three times `global.shutdownDrainSecs` (30) plus 10. |
 | `tolerations` | `object[]` | no |  |  |
-| `tracing` | `object` | no |  | `[observability.tracing]`: OTLP traces. Startup only. |
-| `ui` | `object` | no |  | `[ui]`: Angos's web UI. |
-| `worker` | `object` | no |  | `angos worker`: a `<name>-worker` Deployment draining the background jobs (cache fills, replication, scans, indexes) from a durable queue (`[global.job_queue]`) instead of the server's own loops. |
+| [`tracing`](#spec.tracing) | `object` | no |  | `[observability.tracing]`: OTLP traces. Startup only. |
+| [`ui`](#spec.ui) | `object` | no |  | `[ui]`: Angos's web UI. |
+| [`worker`](#spec.worker) | `object` | no |  | `angos worker`: a `<name>-worker` Deployment draining the background jobs (cache fills, replication, scans, indexes) from a durable queue (`[global.job_queue]`) instead of the server's own loops. |
+
+**Rules**
+
+- more than one replica needs an S3 store (blobs and metadata): the pods share it — `self.replicas <= 1 || (has(self.storage.s3) && (!has(self.storage.metadata) || has(self.storage.metadata.s3)))`
+- more than one replica needs worker.enabled: the background jobs go to a durable queue the worker drains — `self.replicas <= 1 || (has(self.worker) && self.worker.enabled)`
+- `eventWebhooks`: event webhook names are unique — `self.all(w, self.exists_one(o, o.name == w.name))`
+
+### `spec.auth` [#spec.auth]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| [`kubernetes`](#spec.auth.kubernetes) | `object` | no |  | The cluster's ServiceAccount tokens as an OIDC provider (workloads pull with a projected token). |
+| [`oidc`](#spec.auth.oidc) | `object[]` | no |  | `[auth.oidc.<name>]`: OIDC providers whose tokens Angos accepts. |
+| [`tokenService`](#spec.auth.tokenService) | `object` | no |  | `[auth.token_service]`: the tokens `docker login` gets from `/token`. |
+| [`webhooks`](#spec.auth.webhooks) | `object[]` | no |  | `[auth.webhook.<name>]`: HTTP services asked whether a request is allowed (after the access policies). One may be the instance's `default` (`global.authorization_webhook`): it then decides every request — the probes included — and **fails closed**.<br /><br />Constraints: `maxItems: 32` |
+
+**Rules**
+
+- `webhooks`: at most one authorization webhook is the default — `self.filter(w, w.default).size() <= 1`
+- `webhooks`: authorization webhook names are unique — `self.all(w, self.exists_one(o, o.name == w.name))`
+
+### `spec.auth.kubernetes` [#spec.auth.kubernetes]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `audience` | `string` | yes |  | The audience workload tokens must be issued for. |
+| `issuer` | `string` | no |  | The cluster's ServiceAccount issuer. Unset: read once by the operator from the API server's discovery (required when the operator is limited to one namespace). |
+| `jwksUri` | `string` | no |  | Default: `https://kubernetes.default.svc/openid/v1/jwks`, read with the instance's own account token. That account must be bound to `system:service-account-issuer-discovery` (not done by the operator). |
+| `name` | `string` | no | `"kube"` | The provider's name in `auth.oidc` and in access rules (`namespace:` and `serviceaccount:` subjects).<br /><br />Constraints: `pattern: ^[A-Za-z0-9_-]+$` |
+
+### `spec.auth.oidc[]` [#spec.auth.oidc]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `allowedAlgorithms` | `string[]` | no |  | `allowed_algorithms`. Angos: `RS256`. |
+| `audience` | `string` | no |  | `required_audience`: the audience a token must carry. |
+| [`audienceFrom`](#spec.auth.oidc.audienceFrom) | `object` | no |  | A key of a `Secret` in the referencing CR's own namespace. |
+| `clockSkewTolerance` | `integer` | no |  | Constraints: `minimum: 0` |
+| `httpRequestTimeoutSecs` | `integer` | no |  | Constraints: `minimum: 0` |
+| `issuer` | `string` | no |  | The issuer, compared **exactly** with the one the provider advertises (trailing slash included). |
+| [`issuerFrom`](#spec.auth.oidc.issuerFrom) | `object` | no |  | The issuer from a Secret of the namespace (e.g. the `AUTHENTIK_URL` a weebo-authentik application writes), labelled `angos.weebo.io/credential: "true"`. |
+| `jwksRefreshInterval` | `integer` | no |  | Constraints: `minimum: 0` |
+| `jwksRefreshTimeoutSecs` | `integer` | no |  | Constraints: `minimum: 0` |
+| `jwksUri` | `string` | no |  | `jwks_uri`: unset, discovered from the issuer. |
+| `name` | `string` | yes |  | The provider's key: `identity.oidc.provider_name` in access rules, and never an identity's username.<br /><br />Constraints: `pattern: ^[A-Za-z0-9_-]+$` |
+| `requiredClaims` | `string[]` | no |  | `required_claims`: claims a token must carry (non-null). |
+| [`tls`](#spec.auth.oidc.tls) | `object` | no |  | The CA the provider's certificate is checked with (beside the public roots), and a client certificate. |
+
+**Rules**
+
+- an OIDC provider sets issuer or issuerFrom — `has(self.issuer) != has(self.issuerFrom)`
+- an OIDC provider sets audience or audienceFrom: without one, Angos accepts any audience — `has(self.audience) != has(self.audienceFrom)`
+
+### `spec.auth.oidc[].audienceFrom` [#spec.auth.oidc.audienceFrom]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `key` | `string` | yes |  |  |
+| `name` | `string` | yes |  |  |
+
+### `spec.auth.oidc[].issuerFrom` [#spec.auth.oidc.issuerFrom]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `key` | `string` | yes |  |  |
+| `name` | `string` | yes |  |  |
+
+### `spec.auth.oidc[].tls` [#spec.auth.oidc.tls]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| [`ca`](#spec.auth.oidc.tls.ca) | `object` | no |  | A PEM bundle (`server_ca_bundle`). |
+| `clientCertificateSecretName` | `string` | no |  | A `kubernetes.io/tls` Secret (`tls.crt`, `tls.key`) labelled `angos.weebo.io/credential: "true"`, presented for mTLS. |
+
+### `spec.auth.oidc[].tls.ca` [#spec.auth.oidc.tls.ca]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| [`configMapKeyRef`](#spec.auth.oidc.tls.ca.configMapKeyRef) | `object` | no |  | A key of a ConfigMap of the namespace. |
+| [`secretKeyRef`](#spec.auth.oidc.tls.ca.secretKeyRef) | `object` | no |  | A key of a `Secret` in the referencing CR's own namespace. |
+
+**Rules**
+
+- a CA bundle is in a ConfigMap or a Secret — `has(self.configMapKeyRef) != has(self.secretKeyRef)`
+
+### `spec.auth.oidc[].tls.ca.configMapKeyRef` [#spec.auth.oidc.tls.ca.configMapKeyRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `key` | `string` | yes |  |  |
+| `name` | `string` | yes |  |  |
+
+### `spec.auth.oidc[].tls.ca.secretKeyRef` [#spec.auth.oidc.tls.ca.secretKeyRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `key` | `string` | yes |  |  |
+| `name` | `string` | yes |  |  |
+
+### `spec.auth.tokenService` [#spec.auth.tokenService]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| [`keySecretRef`](#spec.auth.tokenService.keySecretRef) | `object` | no |  | The signing key (base64, at least 32 bytes decoded). Unset: the operator generates one in `<instance>-token-key`; the annotation `angos.weebo.io/rotate` changes it — every token is then invalid. |
+| `realm` | `string` | yes |  | `realm`: the public URL of `/token`, `https://<host>/token` (required: Angos would derive it from the request otherwise, wrong behind an ingress).<br /><br />Constraints: `pattern: ^https?://[^/]+(/.*)?/token$` |
+| `ttlSecs` | `integer` | no |  | `ttl_secs` of a token, 1 to 86400. Angos: 3600.<br /><br />Constraints: `minimum: 1`, `maximum: 86400` |
+
+### `spec.auth.tokenService.keySecretRef` [#spec.auth.tokenService.keySecretRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `key` | `string` | yes |  |  |
+| `name` | `string` | yes |  |  |
+
+### `spec.auth.webhooks[]` [#spec.auth.webhooks]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| [`basicAuthSecretRef`](#spec.auth.webhooks.basicAuthSecretRef) | `object` | no |  | Basic credentials (`username`, `password` keys), from a Secret labelled `angos.weebo.io/credential: "true"`. |
+| [`bearerTokenSecretRef`](#spec.auth.webhooks.bearerTokenSecretRef) | `object` | no |  | A bearer token, from a Secret labelled `angos.weebo.io/credential: "true"`. |
+| `default` | `boolean` | no | `false` | `global.authorization_webhook`: asked for every request without a repository's own. |
+| `forwardHeaders` | `string[]` | no |  | Request headers forwarded to the webhook. |
+| `name` | `string` | yes |  | The key repositories name it by (`authorizationWebhook`).<br /><br />Constraints: `pattern: ^[A-Za-z0-9_-]+$`, `minLength: 1`, `maxLength: 63` |
+| `timeoutMs` | `integer` | yes |  | How long Angos waits for an answer (required by Angos).<br /><br />Constraints: `minimum: 1` |
+| [`tls`](#spec.auth.webhooks.tls) | `object` | no |  | A client's TLS towards a service: the CA its certificate is checked with (beside the public roots) and the certificate presented. Mounted in the pods: a change rolls them. |
+| `url` | `string` | yes |  | Constraints: `pattern: ^https?://` |
+
+**Rules**
+
+- an authorization webhook authenticates with a bearer token or Basic credentials, not both — `!(has(self.bearerTokenSecretRef) && has(self.basicAuthSecretRef))`
+
+### `spec.auth.webhooks[].basicAuthSecretRef` [#spec.auth.webhooks.basicAuthSecretRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `name` | `string` | yes |  |  |
+| `passwordKey` | `string` | no | `"password"` |  |
+| `usernameKey` | `string` | no | `"username"` |  |
+
+### `spec.auth.webhooks[].bearerTokenSecretRef` [#spec.auth.webhooks.bearerTokenSecretRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `key` | `string` | yes |  |  |
+| `name` | `string` | yes |  |  |
+
+### `spec.auth.webhooks[].tls` [#spec.auth.webhooks.tls]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| [`ca`](#spec.auth.webhooks.tls.ca) | `object` | no |  | A PEM bundle (`server_ca_bundle`). |
+| `clientCertificateSecretName` | `string` | no |  | A `kubernetes.io/tls` Secret (`tls.crt`, `tls.key`) labelled `angos.weebo.io/credential: "true"`, presented for mTLS. |
+
+### `spec.auth.webhooks[].tls.ca` [#spec.auth.webhooks.tls.ca]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| [`configMapKeyRef`](#spec.auth.webhooks.tls.ca.configMapKeyRef) | `object` | no |  | A key of a ConfigMap of the namespace. |
+| [`secretKeyRef`](#spec.auth.webhooks.tls.ca.secretKeyRef) | `object` | no |  | A key of a `Secret` in the referencing CR's own namespace. |
+
+**Rules**
+
+- a CA bundle is in a ConfigMap or a Secret — `has(self.configMapKeyRef) != has(self.secretKeyRef)`
+
+### `spec.auth.webhooks[].tls.ca.configMapKeyRef` [#spec.auth.webhooks.tls.ca.configMapKeyRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `key` | `string` | yes |  |  |
+| `name` | `string` | yes |  |  |
+
+### `spec.auth.webhooks[].tls.ca.secretKeyRef` [#spec.auth.webhooks.tls.ca.secretKeyRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `key` | `string` | yes |  |  |
+| `name` | `string` | yes |  |  |
+
+### `spec.cache` [#spec.cache]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| [`redis`](#spec.cache.redis) | `object` | yes |  | `[cache.redis]`: a Redis or Valkey the operator doesn't create. |
+
+### `spec.cache.redis` [#spec.cache.redis]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `keyPrefix` | `string` | yes |  | `key_prefix` of every key Angos writes.<br /><br />Constraints: `minLength: 1` |
+| [`urlSecretRef`](#spec.cache.redis.urlSecretRef) | `object` | yes |  | The `redis://` URL (credentials included), in a Secret of the namespace labelled `angos.weebo.io/credential: "true"`. |
+
+### `spec.cache.redis.urlSecretRef` [#spec.cache.redis.urlSecretRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `key` | `string` | yes |  |  |
+| `name` | `string` | yes |  |  |
+
+### `spec.eventWebhooks[]` [#spec.eventWebhooks]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `default` | `boolean` | no | `false` | In `global.event_webhooks`: told of every repository without its own list. |
+| `events` | `string[]` | yes |  | Values: `"manifest.push"`, `"manifest.pull"`, `"manifest.delete"`, `"blob.push"`, `"blob.pull"`, `"tag.create"`, `"tag.delete"`<br /><br />Constraints: `minItems: 1` |
+| `maxRetries` | `integer` | no |  | At most 16. Angos: 3 for `Required`, 0 otherwise.<br /><br />Constraints: `minimum: 0`, `maximum: 16` |
+| `name` | `string` | yes |  | The key repositories name it by (`eventWebhooks`).<br /><br />Constraints: `pattern: ^[A-Za-z0-9_-]+$`, `minLength: 1`, `maxLength: 63` |
+| `policy` | `string` | yes |  | `Required`: the request fails when the webhook does; `Optional`: tried, never blocking; `Async`: sent in the background.<br /><br />Values: `"Required"`, `"Optional"`, `"Async"` |
+| `repositoryFilter` | `string[]` | no |  | Regexes of the namespaces reported; empty: all. |
+| `timeoutMs` | `integer` | no |  | Angos: 5000.<br /><br />Constraints: `minimum: 1` |
+| [`tls`](#spec.eventWebhooks.tls) | `object` | no |  | A client's TLS towards a service: the CA its certificate is checked with (beside the public roots) and the certificate presented. Mounted in the pods: a change rolls them. |
+| [`tokenSecretRef`](#spec.eventWebhooks.tokenSecretRef) | `object` | yes |  | The bearer token Angos sends, from a Secret labelled `angos.weebo.io/credential: "true"`. |
+| `url` | `string` | yes |  | Constraints: `pattern: ^https?://` |
+
+### `spec.eventWebhooks[].tls` [#spec.eventWebhooks.tls]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| [`ca`](#spec.eventWebhooks.tls.ca) | `object` | no |  | A PEM bundle (`server_ca_bundle`). |
+| `clientCertificateSecretName` | `string` | no |  | A `kubernetes.io/tls` Secret (`tls.crt`, `tls.key`) labelled `angos.weebo.io/credential: "true"`, presented for mTLS. |
+
+### `spec.eventWebhooks[].tls.ca` [#spec.eventWebhooks.tls.ca]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| [`configMapKeyRef`](#spec.eventWebhooks.tls.ca.configMapKeyRef) | `object` | no |  | A key of a ConfigMap of the namespace. |
+| [`secretKeyRef`](#spec.eventWebhooks.tls.ca.secretKeyRef) | `object` | no |  | A key of a `Secret` in the referencing CR's own namespace. |
+
+**Rules**
+
+- a CA bundle is in a ConfigMap or a Secret — `has(self.configMapKeyRef) != has(self.secretKeyRef)`
+
+### `spec.eventWebhooks[].tls.ca.configMapKeyRef` [#spec.eventWebhooks.tls.ca.configMapKeyRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `key` | `string` | yes |  |  |
+| `name` | `string` | yes |  |  |
+
+### `spec.eventWebhooks[].tls.ca.secretKeyRef` [#spec.eventWebhooks.tls.ca.secretKeyRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `key` | `string` | yes |  |  |
+| `name` | `string` | yes |  |  |
+
+### `spec.eventWebhooks[].tokenSecretRef` [#spec.eventWebhooks.tokenSecretRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `key` | `string` | yes |  |  |
+| `name` | `string` | yes |  |  |
+
+### `spec.global` [#spec.global]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| [`access`](#spec.global.access) | `object` | no | `{}` | The global access policy, checked before any repository's. |
+| `allowMissingManifestReferences` | `boolean` | no |  | `allow_missing_manifest_references`. Angos: true. |
+| `gcGraceSecs` | `integer` | no |  | `gc_grace_secs`. Angos: 300.<br /><br />Constraints: `minimum: 0` |
+| `immutableTags` | `boolean` | no |  | `immutable_tags`: a tag can't be moved once pushed. |
+| `immutableTagsExclusions` | `string[]` | no |  | `immutable_tags_exclusions`: regexes of the tags left mutable. |
+| [`index`](#spec.global.index) | `object` | no |  | `index` policy of every repository without its own. |
+| [`jobs`](#spec.global.jobs) | `object` | no |  | `max_concurrent_*_jobs`. |
+| [`limits`](#spec.global.limits) | `object` | no |  |  |
+| [`listing`](#spec.global.listing) | `object` | no |  |  |
+| `maxConcurrentRequests` | `integer` | no |  | `max_concurrent_requests` (Angos's worker threads). Startup only. Angos: 64.<br /><br />Constraints: `minimum: 1` |
+| [`pullHistory`](#spec.global.pullHistory) | `object` | no |  | `[global.pull_history]`. |
+| [`redirects`](#spec.global.redirects) | `object` | no |  | Blob and manifest downloads redirected to presigned S3 URLs. **Off by default** (Angos: on): the clients must then reach the bucket themselves. |
+| [`retention`](#spec.global.retention) | `object` | no |  | `retention_policy`: CEL rules on `image` (OR with the repositories'). |
+| `shutdownDrainSecs` | `integer` | no |  | `shutdown_drain_secs`: how long a stopping pod drains. Startup only. Angos: 30; the pods' grace period follows it.<br /><br />Constraints: `minimum: 0` |
+| `updatePullTime` | `boolean` | no |  | `update_pull_time`: record when an image is pulled (needed by any rule on `last_pulled_at` or `top_pulled`). Angos: false. |
+
+### `spec.global.access` [#spec.global.access]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `admin` | `string[]` | no |  | Who may do anything, in every repository too (the rule is added to each repository's policy): named identities, groups or ServiceAccounts only. |
+| `catalog` | `string[]` | no |  | Who may list the catalog, the repositories and their namespaces. |
+| `jobs` | `string[]` | no |  | Who may list, retry and delete background jobs: named identities, groups or ServiceAccounts only. |
+| `metrics` | `string[]` | no |  | Who may scrape `/metrics`. |
+| `rules` | `string[]` | no |  | More CEL rules (`request`, `identity`): a matching one allows. |
+
+### `spec.global.index` [#spec.global.index]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `default` | `string` | no |  | What applies when no rule matches; a matching rule does the opposite.<br /><br />Values: `"Index"`, `"Skip"` |
+| `rules` | `string[]` | no |  |  |
+
+### `spec.global.jobs` [#spec.global.jobs]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `cache` | `integer` | no |  | Constraints: `minimum: 1` |
+| `index` | `integer` | no |  | Constraints: `minimum: 1` |
+| `replication` | `integer` | no |  | Constraints: `minimum: 1` |
+| `scan` | `integer` | no |  | Constraints: `minimum: 1` |
+
+### `spec.global.limits` [#spec.global.limits]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `blobStreamFrameSize` | `string` | no |  | `blob_stream_frame_size`. Angos: `128KiB`.<br /><br />Constraints: `pattern: ^[0-9]+(B\|KB\|KiB\|MB\|MiB\|GB\|GiB\|TB\|TiB)?$` |
+| `maxBlobSize` | `string` | no |  | `max_blob_size`. Angos: `100GiB`.<br /><br />Constraints: `pattern: ^[0-9]+(B\|KB\|KiB\|MB\|MiB\|GB\|GiB\|TB\|TiB)?$` |
+| `maxIndexEntries` | `integer` | no |  | `max_index_entries`. Angos: 500000.<br /><br />Constraints: `minimum: 1` |
+| `maxIndexSize` | `string` | no |  | `max_index_size`. Angos: `50GiB`.<br /><br />Constraints: `pattern: ^[0-9]+(B\|KB\|KiB\|MB\|MiB\|GB\|GiB\|TB\|TiB)?$` |
+| `maxManifestSize` | `string` | no |  | `max_manifest_size`. Angos: `5MiB`.<br /><br />Constraints: `pattern: ^[0-9]+(B\|KB\|KiB\|MB\|MiB\|GB\|GiB\|TB\|TiB)?$` |
+
+### `spec.global.listing` [#spec.global.listing]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `listingReadConcurrency` | `integer` | no |  | Constraints: `minimum: 1` |
+| `namespaceWalkConcurrency` | `integer` | no |  | Constraints: `minimum: 1` |
+| `revisionCacheEntries` | `integer` | no |  | Constraints: `minimum: 1` |
+
+### `spec.global.pullHistory` [#spec.global.pullHistory]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `compactAfterPulls` | `integer` | no |  | Constraints: `minimum: 1` |
+| `compactAfterSecs` | `integer` | no |  | Constraints: `minimum: 0` |
+| `maxAgeSecs` | `integer` | no |  | Constraints: `minimum: 0` |
+| `maxPulls` | `integer` | no |  | Constraints: `minimum: 1` |
+
+### `spec.global.redirects` [#spec.global.redirects]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `blob` | `boolean` | no | `false` | `enable_blob_redirect`. |
+| `manifest` | `boolean` | no | `false` | `enable_manifest_redirect`. |
+
+### `spec.global.retention` [#spec.global.retention]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `rules` | `string[]` | no | `[]` |  |
+
+### `spec.image` [#spec.image]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `pullPolicy` | `string` | no |  | Values: `"Always"`, `"IfNotPresent"`, `"Never"` |
+| `repository` | `string` | no |  | Default: `ghcr.io/project-angos/angos`. |
+| `tag` | `string` | no |  | Default: the Angos version the operator targets. |
+
+### `spec.imagePullSecrets[]` [#spec.imagePullSecrets]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `name` | `string` | yes |  | Name of the referent. This field is effectively required, but due to backwards compatibility is allowed to be empty. Instances of this type with an empty value here are almost certainly wrong. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names |
+
+### `spec.networkPolicy` [#spec.networkPolicy]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `egressTo` | `object[]` | no |  | Where the pods may connect besides DNS (the object store, the OIDC providers, the upstream registries, the API server). |
+| `ingressFrom` | `object[]` | no |  | Who may reach the registry's port; empty: anyone. |
+
+### `spec.pruneLock` [#spec.pruneLock]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `windowHours` | `integer` | no | `24` | Constraints: `minimum: 0` |
+
+### `spec.reload` [#spec.reload]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `mode` | `string` | no | `"Hot"` | `Hot`: Angos reloads the file in place, the operator reads in each pod's log that it did. `Rollout`: every change also rolls the pods.<br /><br />Values: `"Hot"`, `"Rollout"` |
+| `onUnconfirmed` | `string` | no | `"Wait"` | When no answer came in time: `Wait` (keep reading the logs) or `Rollout` (roll the pods, which read the file at start).<br /><br />Values: `"Wait"`, `"Rollout"` |
+| `timeoutSeconds` | `integer` | no | `180` | How long to wait for every pod's answer (the kubelet takes up to 90 s to update a mounted Secret).<br /><br />Constraints: `minimum: 30` |
+
+### `spec.repositorySelector` [#spec.repositorySelector]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| [`namespaces`](#spec.repositorySelector.namespaces) | `object` | no |  | The namespaces whose objects may attach to this instance (with an `instanceRef` naming it): its own always. |
+| [`selector`](#spec.repositorySelector.selector) | `object` | no |  | Only the objects whose labels match; all of them when unset. |
+
+### `spec.repositorySelector.namespaces` [#spec.repositorySelector.namespaces]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `from` | `string` | no | `"Same"` | `Same` (the instance's namespace), `All`, or `Selector`.<br /><br />Values: `"Same"`, `"All"`, `"Selector"` |
+| [`selector`](#spec.repositorySelector.namespaces.selector) | `object` | no |  | The labels of the namespaces accepted, with `from: Selector`. |
+
+**Rules**
+
+- namespaces.selector is required with from: Selector — `self.from != 'Selector' || has(self.selector)`
+
+### `spec.repositorySelector.namespaces.selector` [#spec.repositorySelector.namespaces.selector]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| [`matchExpressions`](#spec.repositorySelector.namespaces.selector.matchExpressions) | `object[]` | no |  | matchExpressions is a list of label selector requirements. The requirements are ANDed. |
+| `matchLabels` | `map[string]` | no |  | matchLabels is a map of \{key,value\} pairs. A single \{key,value\} in the matchLabels map is equivalent to an element of matchExpressions, whose key field is "key", the operator is "In", and the values array contains only "value". The requirements are ANDed. |
+
+### `spec.repositorySelector.namespaces.selector.matchExpressions[]` [#spec.repositorySelector.namespaces.selector.matchExpressions]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `key` | `string` | yes |  | key is the label key that the selector applies to. |
+| `operator` | `string` | yes |  | operator represents a key's relationship to a set of values. Valid operators are In, NotIn, Exists and DoesNotExist. |
+| `values` | `string[]` | no |  | values is an array of string values. If the operator is In or NotIn, the values array must be non-empty. If the operator is Exists or DoesNotExist, the values array must be empty. This array is replaced during a strategic merge patch. |
+
+### `spec.repositorySelector.selector` [#spec.repositorySelector.selector]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| [`matchExpressions`](#spec.repositorySelector.selector.matchExpressions) | `object[]` | no |  | matchExpressions is a list of label selector requirements. The requirements are ANDed. |
+| `matchLabels` | `map[string]` | no |  | matchLabels is a map of \{key,value\} pairs. A single \{key,value\} in the matchLabels map is equivalent to an element of matchExpressions, whose key field is "key", the operator is "In", and the values array contains only "value". The requirements are ANDed. |
+
+### `spec.repositorySelector.selector.matchExpressions[]` [#spec.repositorySelector.selector.matchExpressions]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `key` | `string` | yes |  | key is the label key that the selector applies to. |
+| `operator` | `string` | yes |  | operator represents a key's relationship to a set of values. Valid operators are In, NotIn, Exists and DoesNotExist. |
+| `values` | `string[]` | no |  | values is an array of string values. If the operator is In or NotIn, the values array must be non-empty. If the operator is Exists or DoesNotExist, the values array must be empty. This array is replaced during a strategic merge patch. |
+
+### `spec.scan` [#spec.scan]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `default` | `string` | no |  | What applies when no rule matches (unset: `Skip`); a matching rule does the opposite. A repository's own `scan` replaces it.<br /><br />Values: `"Scan"`, `"Skip"` |
+| `rules` | `string[]` | no |  | CEL rules on `image`. |
+| `timeoutSecs` | `integer` | no |  | Angos: 600.<br /><br />Constraints: `minimum: 1` |
+| [`tls`](#spec.scan.tls) | `object` | no |  | A client's TLS towards a service: the CA its certificate is checked with (beside the public roots) and the certificate presented. Mounted in the pods: a change rolls them. |
+| [`tokenSecretRef`](#spec.scan.tokenSecretRef) | `object` | no |  | The scanner's token, from a Secret labelled `angos.weebo.io/credential: "true"`. |
+| `url` | `string` | yes |  | The scanner's base URL (Angos posts to `<url>/scan`).<br /><br />Constraints: `pattern: ^https?://` |
+
+### `spec.scan.tls` [#spec.scan.tls]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| [`ca`](#spec.scan.tls.ca) | `object` | no |  | A PEM bundle (`server_ca_bundle`). |
+| `clientCertificateSecretName` | `string` | no |  | A `kubernetes.io/tls` Secret (`tls.crt`, `tls.key`) labelled `angos.weebo.io/credential: "true"`, presented for mTLS. |
+
+### `spec.scan.tls.ca` [#spec.scan.tls.ca]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| [`configMapKeyRef`](#spec.scan.tls.ca.configMapKeyRef) | `object` | no |  | A key of a ConfigMap of the namespace. |
+| [`secretKeyRef`](#spec.scan.tls.ca.secretKeyRef) | `object` | no |  | A key of a `Secret` in the referencing CR's own namespace. |
+
+**Rules**
+
+- a CA bundle is in a ConfigMap or a Secret — `has(self.configMapKeyRef) != has(self.secretKeyRef)`
+
+### `spec.scan.tls.ca.configMapKeyRef` [#spec.scan.tls.ca.configMapKeyRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `key` | `string` | yes |  |  |
+| `name` | `string` | yes |  |  |
+
+### `spec.scan.tls.ca.secretKeyRef` [#spec.scan.tls.ca.secretKeyRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `key` | `string` | yes |  |  |
+| `name` | `string` | yes |  |  |
+
+### `spec.scan.tokenSecretRef` [#spec.scan.tokenSecretRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `key` | `string` | yes |  |  |
+| `name` | `string` | yes |  |  |
+
+### `spec.server` [#spec.server]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `handshakeTimeoutSecs` | `integer` | no |  | `server.handshake_timeout` (seconds, \> 0). Angos: 10.<br /><br />Constraints: `minimum: 1` |
+| `port` | `integer` | no | `8000` | `server.port`, and the container's port. Read at startup only: a change rolls the pods.<br /><br />Constraints: `minimum: 1`, `maximum: 65535` |
+| `queryTimeoutGracePeriodSecs` | `integer` | no |  | `server.query_timeout_grace_period` (seconds, \> 0). Angos: 60.<br /><br />Constraints: `minimum: 1` |
+| `queryTimeoutSecs` | `integer` | no |  | `server.query_timeout` (seconds, \> 0). Angos: 3600.<br /><br />Constraints: `minimum: 1` |
+| [`tls`](#spec.server.tls) | `object` | no |  | `[server.tls]`: Angos serves TLS itself, from a `kubernetes.io/tls` Secret mounted in the pods. Certificates are reloaded by Angos when the Secret changes; turning TLS on or off rolls the pods. |
+| `trustedProxies` | `string[]` | no |  | `global.trusted_proxies`: the IPs or CIDRs whose forwarded headers Angos trusts. Behind an ingress, without it, the client IP Angos sees is the ingress controller's. |
+
+### `spec.server.tls` [#spec.server.tls]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `clientAuth` | `string` | no | `"Optional"` | `client_auth`: `Optional` (a certificate is checked when given) or `Required`.<br /><br />Values: `"Optional"`, `"Required"` |
+| [`clientCA`](#spec.server.tls.clientCA) | `object` | no |  | The CA that client certificates must chain to (`client_ca_bundle`): a key of a Secret of the namespace, labelled `angos.weebo.io/credential: "true"`. |
+| `secretName` | `string` | yes |  | A `kubernetes.io/tls` Secret of the namespace (`tls.crt`, `tls.key`), labelled `angos.weebo.io/credential: "true"`. |
+
+**Rules**
+
+- clientAuth: Required needs clientCA — `self.clientAuth != 'Required' || has(self.clientCA)`
+
+### `spec.server.tls.clientCA` [#spec.server.tls.clientCA]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `key` | `string` | yes |  |  |
+| `name` | `string` | yes |  |  |
+
+### `spec.service` [#spec.service]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `annotations` | `map[string]` | no |  |  |
+| `port` | `integer` | no | `8000` | The Service's port (the container's is `server.port`). |
+| `type` | `string` | no | `"ClusterIP"` | Values: `"ClusterIP"`, `"NodePort"`, `"LoadBalancer"` |
+
+### `spec.serviceAccount` [#spec.serviceAccount]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `annotations` | `map[string]` | no |  |  |
+| `create` | `boolean` | no | `true` | `false`: use `name`, which must exist. |
+| `name` | `string` | no |  | Default: the instance's name. |
+
+### `spec.storage` [#spec.storage]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| [`fs`](#spec.storage.fs) | `object` | no |  | `[blob_store.fs]`: a directory of the pods, on a volume. |
+| [`metadata`](#spec.storage.metadata) | `object` | no |  | `[metadata_store]`: unset, the blob store holds the metadata too. |
+| [`s3`](#spec.storage.s3) | `object` | no |  | `[blob_store.s3]`: an S3-compatible bucket. |
+
+**Rules**
+
+- storage sets exactly one of s3 and fs — `has(self.s3) != has(self.fs)`
+
+### `spec.storage.fs` [#spec.storage.fs]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `rootDir` | `string` | no | `"/data"` | `root_dir`: where the volume is mounted. |
+| `syncToDisk` | `boolean` | no |  | `sync_to_disk`: fsync every write. Angos: false. |
+| [`volume`](#spec.storage.fs.volume) | `object` | no |  | The volume under `rootDir`: an existing claim, or one the operator creates once (never resized). Unset: an `emptyDir` — the data goes with the pod. |
+
+### `spec.storage.fs.volume` [#spec.storage.fs.volume]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `accessMode` | `string` | no | `"ReadWriteOnce"` | Values: `"ReadWriteOnce"`, `"ReadWriteMany"`, `"ReadWriteOncePod"` |
+| `claimName` | `string` | no |  | An existing `PersistentVolumeClaim` of the namespace. |
+| `size` | `string` | no |  | The size of the claim the operator creates (`<instance>-data`). |
+| `storageClass` | `string` | no |  |  |
+
+**Rules**
+
+- volume sets claimName or size, not both — `has(self.claimName) != has(self.size)`
+
+### `spec.storage.metadata` [#spec.storage.metadata]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| [`fs`](#spec.storage.metadata.fs) | `object` | no |  |  |
+| [`s3`](#spec.storage.metadata.s3) | `object` | no |  |  |
+
+**Rules**
+
+- storage.metadata sets exactly one of s3 and fs — `has(self.s3) != has(self.fs)`
+
+### `spec.storage.metadata.fs` [#spec.storage.metadata.fs]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `rootDir` | `string` | no | `"/data"` | `root_dir`: where the volume is mounted. |
+| `syncToDisk` | `boolean` | no |  | `sync_to_disk`: fsync every write. Angos: false. |
+| [`volume`](#spec.storage.metadata.fs.volume) | `object` | no |  | The volume under `rootDir`: an existing claim, or one the operator creates once (never resized). Unset: an `emptyDir` — the data goes with the pod. |
+
+### `spec.storage.metadata.fs.volume` [#spec.storage.metadata.fs.volume]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `accessMode` | `string` | no | `"ReadWriteOnce"` | Values: `"ReadWriteOnce"`, `"ReadWriteMany"`, `"ReadWriteOncePod"` |
+| `claimName` | `string` | no |  | An existing `PersistentVolumeClaim` of the namespace. |
+| `size` | `string` | no |  | The size of the claim the operator creates (`<instance>-data`). |
+| `storageClass` | `string` | no |  |  |
+
+**Rules**
+
+- volume sets claimName or size, not both — `has(self.claimName) != has(self.size)`
+
+### `spec.storage.metadata.s3` [#spec.storage.metadata.s3]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `bucket` | `string` | yes |  |  |
+| [`credentialsSecretRef`](#spec.storage.metadata.s3.credentialsSecretRef) | `object` | yes |  | The access key, in a Secret of the namespace labelled `angos.weebo.io/credential: "true"`. A change of the Secret's content alone rolls the pods without confirmation. |
+| `endpoint` | `string` | yes |  | The S3 endpoint URL, e.g. `https://s3.example.com`. |
+| `keyPrefix` | `string` | no |  | A prefix of every key Angos writes. |
+| `region` | `string` | yes |  | The bucket's region (`us-east-1` for most S3-compatible stores). |
+| [`transport`](#spec.storage.metadata.s3.transport) | `object` | no |  | Tuning of the S3 client; Angos's defaults when unset. |
+
+### `spec.storage.metadata.s3.credentialsSecretRef` [#spec.storage.metadata.s3.credentialsSecretRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `accessKeyIdKey` | `string` | no | `"access-key-id"` |  |
+| `name` | `string` | yes |  |  |
+| `secretKeyKey` | `string` | no | `"secret-key"` |  |
+
+### `spec.storage.metadata.s3.transport` [#spec.storage.metadata.s3.transport]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `childrenScanConcurrency` | `integer` | no |  | Constraints: `minimum: 1` |
+| `circuitBreakerCooldownSecs` | `integer` | no |  | Constraints: `minimum: 0` |
+| `circuitBreakerThreshold` | `integer` | no |  | Constraints: `minimum: 0` |
+| `maxAttempts` | `integer` | no |  | Constraints: `minimum: 0` |
+| `multipartCopyChunkSize` | `string` | no |  | Constraints: `pattern: ^[0-9]+(B\|KB\|KiB\|MB\|MiB\|GB\|GiB\|TB\|TiB)?$` |
+| `multipartCopyJobs` | `integer` | no |  | Constraints: `minimum: 1` |
+| `multipartCopyThreshold` | `string` | no |  | Constraints: `pattern: ^[0-9]+(B\|KB\|KiB\|MB\|MiB\|GB\|GiB\|TB\|TiB)?$` |
+| `multipartPartSize` | `string` | no |  | `multipart_part_size`, at least `5MiB` (S3's minimum part).<br /><br />Constraints: `pattern: ^[0-9]+(B\|KB\|KiB\|MB\|MiB\|GB\|GiB\|TB\|TiB)?$` |
+| `multipartUniformParts` | `boolean` | no |  |  |
+| `operationAttemptTimeoutSecs` | `integer` | no |  | Constraints: `minimum: 0` |
+| `operationTimeoutSecs` | `integer` | no |  | Constraints: `minimum: 0` |
+| `presignTtlSecs` | `integer` | no |  | How long a presigned URL lives (redirects). Angos: 1800.<br /><br />Constraints: `minimum: 0` |
+
+### `spec.storage.s3` [#spec.storage.s3]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `bucket` | `string` | yes |  |  |
+| [`credentialsSecretRef`](#spec.storage.s3.credentialsSecretRef) | `object` | yes |  | The access key, in a Secret of the namespace labelled `angos.weebo.io/credential: "true"`. A change of the Secret's content alone rolls the pods without confirmation. |
+| `endpoint` | `string` | yes |  | The S3 endpoint URL, e.g. `https://s3.example.com`. |
+| `keyPrefix` | `string` | no |  | A prefix of every key Angos writes. |
+| `region` | `string` | yes |  | The bucket's region (`us-east-1` for most S3-compatible stores). |
+| [`transport`](#spec.storage.s3.transport) | `object` | no |  | Tuning of the S3 client; Angos's defaults when unset. |
+
+### `spec.storage.s3.credentialsSecretRef` [#spec.storage.s3.credentialsSecretRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `accessKeyIdKey` | `string` | no | `"access-key-id"` |  |
+| `name` | `string` | yes |  |  |
+| `secretKeyKey` | `string` | no | `"secret-key"` |  |
+
+### `spec.storage.s3.transport` [#spec.storage.s3.transport]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `childrenScanConcurrency` | `integer` | no |  | Constraints: `minimum: 1` |
+| `circuitBreakerCooldownSecs` | `integer` | no |  | Constraints: `minimum: 0` |
+| `circuitBreakerThreshold` | `integer` | no |  | Constraints: `minimum: 0` |
+| `maxAttempts` | `integer` | no |  | Constraints: `minimum: 0` |
+| `multipartCopyChunkSize` | `string` | no |  | Constraints: `pattern: ^[0-9]+(B\|KB\|KiB\|MB\|MiB\|GB\|GiB\|TB\|TiB)?$` |
+| `multipartCopyJobs` | `integer` | no |  | Constraints: `minimum: 1` |
+| `multipartCopyThreshold` | `string` | no |  | Constraints: `pattern: ^[0-9]+(B\|KB\|KiB\|MB\|MiB\|GB\|GiB\|TB\|TiB)?$` |
+| `multipartPartSize` | `string` | no |  | `multipart_part_size`, at least `5MiB` (S3's minimum part).<br /><br />Constraints: `pattern: ^[0-9]+(B\|KB\|KiB\|MB\|MiB\|GB\|GiB\|TB\|TiB)?$` |
+| `multipartUniformParts` | `boolean` | no |  |  |
+| `operationAttemptTimeoutSecs` | `integer` | no |  | Constraints: `minimum: 0` |
+| `operationTimeoutSecs` | `integer` | no |  | Constraints: `minimum: 0` |
+| `presignTtlSecs` | `integer` | no |  | How long a presigned URL lives (redirects). Angos: 1800.<br /><br />Constraints: `minimum: 0` |
+
+### `spec.tracing` [#spec.tracing]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `endpoint` | `string` | yes |  | The OTLP gRPC endpoint. |
+| `samplingRate` | `number` | yes |  | The share of traces kept, from 0 to 1.<br /><br />Constraints: `minimum: 0`, `maximum: 1` |
+
+### `spec.ui` [#spec.ui]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `enabled` | `boolean` | no | `false` |  |
+| `name` | `string` | no |  | The name the UI shows. Angos: `Angos`. |
+| [`oidc`](#spec.ui.oidc) | `object` | no |  | Sign-in to the UI through an OIDC provider of `auth.oidc` (a public PKCE client, no secret). |
+
+### `spec.ui.oidc` [#spec.ui.oidc]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `clientId` | `string` | no |  |  |
+| [`clientIdFrom`](#spec.ui.oidc.clientIdFrom) | `object` | no |  | The client id from a Secret of the namespace (e.g. the `AUTHENTIK_CLIENT_ID` a weebo-authentik application writes), labelled `angos.weebo.io/credential: "true"`. |
+| `provider` | `string` | yes |  | The `name` of an `auth.oidc` provider. |
+| `scopes` | `string[]` | no |  | The scopes asked. Angos: `openid profile email`. |
+
+**Rules**
+
+- ui.oidc sets clientId or clientIdFrom — `has(self.clientId) != has(self.clientIdFrom)`
+
+### `spec.ui.oidc.clientIdFrom` [#spec.ui.oidc.clientIdFrom]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `key` | `string` | yes |  |  |
+| `name` | `string` | yes |  |  |
+
+### `spec.worker` [#spec.worker]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `enabled` | `boolean` | no | `true` | Turning it on or off rolls the server (its queue is a startup setting): the worker is ready before the server hands it the jobs, and removed after the server took them back. |
+| [`jobQueue`](#spec.worker.jobQueue) | `object` | no |  | `[global.job_queue]`'s tunables. |
+| `pollIntervalSeconds` | `integer` | no |  | `--poll-interval`: how long an idle worker waits. Angos: 1.<br /><br />Constraints: `minimum: 1` |
+| `queues` | `string[]` | no |  | The queues drained (`--queue`): empty, Angos's default (cache, replication, index, and scan when a scanner is configured).<br /><br />Values: `"cache"`, `"replication"`, `"scan"`, `"index"` |
+| `replicas` | `integer` | no | `1` | Constraints: `minimum: 1` |
+| `resources` | `object` | no |  | Unset: the server's default (requests 100m CPU / 256Mi, limit 1Gi). |
+
+### `spec.worker.jobQueue` [#spec.worker.jobQueue]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `claimTtlSecs` | `integer` | no |  | The lease on a claimed job: a crashed worker's jobs are taken over after it. Angos: 60.<br /><br />Constraints: `minimum: 3` |
+| `maxAttempts` | `integer` | no |  | Angos: 5.<br /><br />Constraints: `minimum: 1` |
+| `pendingReadyHorizonSecs` | `integer` | no |  | Angos: 600.<br /><br />Constraints: `minimum: 0` |
+| `pendingRefreshIntervalSecs` | `integer` | no |  | Angos: 15.<br /><br />Constraints: `minimum: 5` |
+| `retryBackoffMaxMs` | `integer` | no |  | Angos: 10000.<br /><br />Constraints: `minimum: 0` |
+| `retryBackoffMinMs` | `integer` | no |  | Angos: 100.<br /><br />Constraints: `minimum: 0` |
 
 ## Build a manifest
 
