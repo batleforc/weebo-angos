@@ -14,12 +14,12 @@ use application::use_cases::reconcile_identity::{
     IdentityPass, IdentityPorts, reconcile_identity, release,
 };
 use kube::api::Api;
-use kube::runtime::WatchStreamExt;
 use kube::runtime::controller::Action;
 use kube::runtime::finalizer::{Event as Finalizer, finalizer};
 use kube::runtime::reflector::ObjectRef;
 use kube::{Client, Resource, ResourceExt};
 use weebo_kit_runtime::events;
+use weebo_kit_runtime::shared::WatchesIn;
 use weebo_kit_runtime::status::StatusUpdate;
 
 use super::{Ctx, Error, error_policy};
@@ -34,13 +34,13 @@ pub async fn run(client: Client, ctx: Arc<Ctx>) {
         // Only when what the instance made of its identities changes: its
         // other status writes (a reload being confirmed…) would wake them
         // all for nothing.
-        .watches_stream(
-            super::touched::<LocalInstance>(&ctx, &client).predicate_filter(
-                |instance: &LocalInstance| {
-                    super::hash_of(&instance.status.as_ref().map(|s| &s.identities))
-                },
-                Default::default(),
-            ),
+        .watches_in_filtered(
+            &ctx.watches,
+            &ctx.scope,
+            &client,
+            |instance: &LocalInstance| {
+                super::hash_of(&instance.status.as_ref().map(|s| &s.identities))
+            },
             |instance| {
                 instance
                     .status
