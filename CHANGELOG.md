@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.1.1](https://github.com/batleforc/weebo-angos/compare/aa2c02f8f06f1ae3bcc047fa0e2eea07f4351583..v0.1.1) - 2026-10-19
+#### Miscellaneous Chores
+- (**kit**) weebo-operator-kit v0.18.2, 4 tokio workers by default (#13) - ([aa2c02f](https://github.com/batleforc/weebo-angos/commit/aa2c02f8f06f1ae3bcc047fa0e2eea07f4351583)) - Maxime, Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.1.0](https://github.com/batleforc/weebo-angos/compare/v0.1.0-alpha.2..v0.1.0) - 2026-10-16
 #### Features
 - the resource budget measured (task perf), and fewer wake-ups while waiting (#12) - ([efe6cf4](https://github.com/batleforc/weebo-angos/commit/efe6cf4a3447db5d6c692e75257931030eba8173)) - Maxime, Claude Opus 5.5
