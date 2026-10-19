@@ -27,6 +27,7 @@ use kube::runtime::reflector::ObjectRef;
 use kube::runtime::{WatchStreamExt, watcher};
 use kube::{Client, Resource, ResourceExt};
 use weebo_kit_runtime::events;
+use weebo_kit_runtime::shared::WatchesIn;
 use weebo_kit_runtime::status::StatusUpdate;
 
 use super::{Ctx, Error, error_policy};
@@ -82,36 +83,36 @@ pub async fn run(client: Client, ctx: Arc<Ctx>) {
             |p| instance_of(&p),
         )
         // A repository bound to an instance (or no longer) re-renders it.
-        .watches_stream(
-            super::touched::<api::Repository>(&ctx, &client).predicate_filter(
-                |repo: &api::Repository| {
-                    // `rendered` and `conflictWith` come from the instance.
-                    bound_change(repo, repo.status.as_ref().map(|s| &s.common.instance))
-                },
-                Default::default(),
-            ),
+        .watches_in_filtered(
+            &ctx.watches,
+            &ctx.scope,
+            &client,
+            |repo: &api::Repository| {
+                // `rendered` and `conflictWith` come from the instance.
+                bound_change(repo, repo.status.as_ref().map(|s| &s.common.instance))
+            },
             |repo| {
                 let bound = repo.status.as_ref()?.common.instance.clone()?;
                 Some(ObjectRef::new(&bound.name).within(bound.namespace.as_deref()?))
             },
         )
-        .watches_stream(
-            super::touched::<api::Identity>(&ctx, &client).predicate_filter(
-                |identity: &api::Identity| {
-                    // Its status without the conditions: the password version
-                    // it holds is what the instance renders.
-                    let status = identity.status.as_ref().map(|s| {
-                        let mut s = serde_json::to_value(s).unwrap_or_default();
-                        if let Some(m) = s.as_object_mut() {
-                            m.remove("conditions");
-                            m.remove("observedGeneration");
-                        }
-                        s
-                    });
-                    bound_change(identity, status)
-                },
-                Default::default(),
-            ),
+        .watches_in_filtered(
+            &ctx.watches,
+            &ctx.scope,
+            &client,
+            |identity: &api::Identity| {
+                // Its status without the conditions: the password version
+                // it holds is what the instance renders.
+                let status = identity.status.as_ref().map(|s| {
+                    let mut s = serde_json::to_value(s).unwrap_or_default();
+                    if let Some(m) = s.as_object_mut() {
+                        m.remove("conditions");
+                        m.remove("observedGeneration");
+                    }
+                    s
+                });
+                bound_change(identity, status)
+            },
             |identity| {
                 let bound = identity.status.as_ref()?.common.instance.clone()?;
                 Some(ObjectRef::new(&bound.name).within(bound.namespace.as_deref()?))

@@ -15,18 +15,14 @@ use application::ports::{
 use application::use_cases::Outcome;
 use domain::Failure;
 use domain::error::ReasonCode;
-use futures::StreamExt;
-use futures::stream::BoxStream;
 use kube::api::Api;
 use kube::runtime::controller::Action;
 use kube::runtime::events::Recorder;
-use kube::runtime::{WatchStreamExt, watcher};
 use kube::{Client, Resource};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use weebo_kit_runtime::events;
 use weebo_kit_runtime::metrics::ReconcileMetrics;
-use weebo_kit_runtime::scope::KindScope;
 use weebo_kit_runtime::shared::SharedWatches;
 use weebo_kit_runtime::status::StatusUpdate;
 use weebo_kit_runtime::{Health, WatchScope};
@@ -133,27 +129,6 @@ pub fn spawn_watches(client: &Client, scope: &WatchScope, health: &Arc<Health>) 
         "AngosMaintenance watch",
     );
     watches
-}
-
-/// The objects of a kind the CRs reference, as touched (deleted ones
-/// included): its shared watch when the binary spawned one, else a watch
-/// of its own through the scope. What `watches_stream` takes, for a
-/// mapping behind a predicate (`WatchesIn::watches_in` has none).
-pub fn touched<K>(ctx: &Ctx, client: &Client) -> BoxStream<'static, Result<K, watcher::Error>>
-where
-    K: Resource<DynamicType = ()> + Clone + Debug + DeserializeOwned + Send + Sync + 'static,
-    K::Scope: KindScope,
-{
-    match ctx.watches.get::<K>() {
-        Some(shared) => shared.touched().boxed(),
-        None => watcher(
-            ctx.scope.api::<K>(client.clone()),
-            ctx.scope.watcher_config(),
-        )
-        .default_backoff()
-        .touched_objects()
-        .boxed(),
-    }
 }
 
 /// What the operator's environment sets (spec 6.11).
