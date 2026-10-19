@@ -2,6 +2,14 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.1.3](https://github.com/batleforc/weebo-angos/compare/e839e4c2613b3e3d8abd17a5d254f612d209406d..v0.1.3) - 2026-10-19
+#### Refactoring
+- (**controller**) one shared watch per kind (kit v0.20.0) (#16) - ([5d98746](https://github.com/batleforc/weebo-angos/commit/5d98746e38689fbabcb966a999dc59eb42e96ad3)) - Maxime, Claude Opus 5.5 (1M context)
+#### Miscellaneous Chores
+- (**kit**) weebo-operator-kit v0.20.0, RepeatedDrift off (no remote writes) (#15) - ([e839e4c](https://github.com/batleforc/weebo-angos/commit/e839e4c2613b3e3d8abd17a5d254f612d209406d)) - Maxime, Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.1.2](https://github.com/batleforc/weebo-angos/compare/c3f50f402a2dea79f0d0d277f994f5fee4129331..v0.1.2) - 2026-10-19
 #### Miscellaneous Chores
 - (**kit**) weebo-operator-kit v0.19.1, nested CRD fields in the reference (#14) - ([c3f50f4](https://github.com/batleforc/weebo-angos/commit/c3f50f402a2dea79f0d0d277f994f5fee4129331)) - Maxime, Claude Opus 5.5 (1M context)
