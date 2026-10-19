@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.1.2](https://github.com/batleforc/weebo-angos/compare/c3f50f402a2dea79f0d0d277f994f5fee4129331..v0.1.2) - 2026-10-19
+#### Miscellaneous Chores
+- (**kit**) weebo-operator-kit v0.19.1, nested CRD fields in the reference (#14) - ([c3f50f4](https://github.com/batleforc/weebo-angos/commit/c3f50f402a2dea79f0d0d277f994f5fee4129331)) - Maxime, Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.1.1](https://github.com/batleforc/weebo-angos/compare/aa2c02f8f06f1ae3bcc047fa0e2eea07f4351583..v0.1.1) - 2026-10-19
 #### Miscellaneous Chores
 - (**kit**) weebo-operator-kit v0.18.2, 4 tokio workers by default (#13) - ([aa2c02f](https://github.com/batleforc/weebo-angos/commit/aa2c02f8f06f1ae3bcc047fa0e2eea07f4351583)) - Maxime, Claude Opus 5.5 (1M context)
