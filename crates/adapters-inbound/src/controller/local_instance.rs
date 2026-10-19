@@ -68,7 +68,9 @@ pub async fn run(client: Client, ctx: Arc<Ctx>) {
     // Metadata only: what changed, not the objects.
     let deployments: Api<PartialObjectMeta<Deployment>> = ctx.scope.api(client.clone());
     let pod_api: Api<PartialObjectMeta<Pod>> = ctx.scope.api(client.clone());
-    let results = super::controller(ctx.scope.api::<LocalInstance>(client.clone()), &ctx.scope)
+    let results = ctx
+        .watches
+        .controller(ctx.scope.api::<LocalInstance>(client.clone()), &ctx.scope)
         .watches_stream(
             watcher(deployments, owned)
                 .default_backoff()
@@ -81,13 +83,7 @@ pub async fn run(client: Client, ctx: Arc<Ctx>) {
         )
         // A repository bound to an instance (or no longer) re-renders it.
         .watches_stream(
-            watcher(
-                ctx.scope.api::<api::Repository>(client.clone()),
-                ctx.scope.watcher_config(),
-            )
-            .default_backoff()
-            .touched_objects()
-            .predicate_filter(
+            super::touched::<api::Repository>(&ctx, &client).predicate_filter(
                 |repo: &api::Repository| {
                     // `rendered` and `conflictWith` come from the instance.
                     bound_change(repo, repo.status.as_ref().map(|s| &s.common.instance))
@@ -100,13 +96,7 @@ pub async fn run(client: Client, ctx: Arc<Ctx>) {
             },
         )
         .watches_stream(
-            watcher(
-                ctx.scope.api::<api::Identity>(client.clone()),
-                ctx.scope.watcher_config(),
-            )
-            .default_backoff()
-            .touched_objects()
-            .predicate_filter(
+            super::touched::<api::Identity>(&ctx, &client).predicate_filter(
                 |identity: &api::Identity| {
                     // Its status without the conditions: the password version
                     // it holds is what the instance renders.

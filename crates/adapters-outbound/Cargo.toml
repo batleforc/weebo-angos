@@ -26,6 +26,7 @@ weebo-kit-application = { workspace = true }
 cel-interpreter = "=0.10.0"
 cel-parser = "=0.10.1"
 weebo-kit-adapters = { workspace = true }
+weebo-kit-runtime = { workspace = true }
 weebo-kit-api = { workspace = true }
 
 [dev-dependencies]

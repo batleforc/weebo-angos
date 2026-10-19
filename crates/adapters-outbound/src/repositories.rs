@@ -17,13 +17,18 @@ use k8s_openapi::api::core::v1::Namespace;
 use kube::api::{Api, ListParams};
 use kube::core::{Selector, SelectorExt};
 use kube::{Client, ResourceExt};
+use weebo_kit_adapters::instance::STORE_READY_TIMEOUT;
 use weebo_kit_api::BoundInstance;
 use weebo_kit_application::sharing::shares_with;
+use weebo_kit_runtime::shared::SharedWatches;
 
 pub struct KubeRepositories {
     client: Client,
     watched_namespace: Option<String>,
     selector: Option<Selector>,
+    /// The binary's shared watches: each kind read from its store once
+    /// listed, from the API otherwise.
+    watches: SharedWatches,
 }
 
 impl KubeRepositories {
@@ -32,7 +37,42 @@ impl KubeRepositories {
             client,
             watched_namespace: None,
             selector: None,
+            watches: SharedWatches::default(),
         }
+    }
+
+    /// Read the repositories and identities from the binary's shared
+    /// watches (on the scope of [`Self::with_scope`]) instead of a LIST on
+    /// every instance pass.
+    pub fn with_watches(mut self, watches: SharedWatches) -> Self {
+        self.watches = watches;
+        self
+    }
+
+    /// Every `K` in the operator's scope: from its shared watch once it
+    /// has listed (an unsynced store is never read as empty), from the API
+    /// otherwise; sorted as the API server would.
+    async fn list<K: Bound>(&self) -> Result<Vec<K>, String> {
+        if let Some(shared) = self.watches.get::<K>() {
+            let store = shared.store();
+            if weebo_kit_adapters::wait_synced(&store, STORE_READY_TIMEOUT).await {
+                let mut all: Vec<K> = store.state().iter().map(|o| K::clone(o)).collect();
+                all.sort_by_key(|o| (o.namespace(), o.name_any()));
+                return Ok(all);
+            }
+        }
+        let api: Api<K> = match &self.watched_namespace {
+            Some(ns) => Api::namespaced(self.client.clone(), ns),
+            None => Api::all(self.client.clone()),
+        };
+        let params = match &self.selector {
+            Some(s) => ListParams::default().labels_from(s),
+            None => ListParams::default(),
+        };
+        api.list(&params)
+            .await
+            .map(|l| l.items)
+            .map_err(|e| format!("listing {}: {e}", K::kind(&())))
     }
 
     /// The operator's watch scope.
@@ -75,21 +115,9 @@ impl Bound for Identity {
 #[async_trait::async_trait]
 impl RepositoryDirectory for KubeRepositories {
     async fn aiming_at(&self, instance: &Owner) -> Result<Vec<String>, String> {
-        let api: Api<Repository> = match &self.watched_namespace {
-            Some(ns) => Api::namespaced(self.client.clone(), ns),
-            None => Api::all(self.client.clone()),
-        };
-        let params = match &self.selector {
-            Some(s) => ListParams::default().labels_from(s),
-            None => ListParams::default(),
-        };
-        let listed = api
-            .list(&params)
-            .await
-            .map_err(|e| format!("listing AngosRepositories: {e}"))?;
+        let listed = self.list::<Repository>().await?;
         let bound = BoundInstance::local(instance.namespace.clone(), instance.name.clone());
         Ok(listed
-            .items
             .into_iter()
             .filter(|repo| {
                 let namespace = repo.namespace().unwrap_or_default();
@@ -170,18 +198,7 @@ impl KubeRepositories {
         instance: &Owner,
         selector: &RepositorySelector,
     ) -> Result<Vec<K>, String> {
-        let api: Api<K> = match &self.watched_namespace {
-            Some(ns) => Api::namespaced(self.client.clone(), ns),
-            None => Api::all(self.client.clone()),
-        };
-        let params = match &self.selector {
-            Some(s) => ListParams::default().labels_from(s),
-            None => ListParams::default(),
-        };
-        let listed = api
-            .list(&params)
-            .await
-            .map_err(|e| format!("listing {}: {e}", K::kind(&())))?;
+        let listed = self.list::<K>().await?;
         let bound = BoundInstance::local(instance.namespace.clone(), instance.name.clone());
         let own: Option<Selector> = selector
             .selector
@@ -192,7 +209,7 @@ impl KubeRepositories {
         let shared = selector.namespaces.shared_with();
         let mut labels_of: BTreeMap<String, Option<BTreeMap<String, String>>> = BTreeMap::new();
         let mut out = Vec::new();
-        for repo in listed.items {
+        for repo in listed {
             if repo.bound() != Some(&bound) {
                 continue;
             }
