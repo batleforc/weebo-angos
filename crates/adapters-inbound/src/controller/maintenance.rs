@@ -27,7 +27,9 @@ const KIND: &str = "AngosMaintenance";
 pub async fn run(client: Client, ctx: Arc<Ctx>) {
     let health = ctx.health.clone();
     let jobs: Api<PartialObjectMeta<Job>> = ctx.scope.api(client.clone());
-    let results = super::controller(ctx.scope.api::<Maintenance>(client), &ctx.scope)
+    let results = ctx
+        .watches
+        .controller(ctx.scope.api::<Maintenance>(client), &ctx.scope)
         .watches_stream(
             watcher(
                 jobs,

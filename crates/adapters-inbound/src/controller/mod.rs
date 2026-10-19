@@ -15,14 +15,19 @@ use application::ports::{
 use application::use_cases::Outcome;
 use domain::Failure;
 use domain::error::ReasonCode;
+use futures::StreamExt;
+use futures::stream::BoxStream;
 use kube::api::Api;
 use kube::runtime::controller::Action;
 use kube::runtime::events::Recorder;
+use kube::runtime::{WatchStreamExt, watcher};
 use kube::{Client, Resource};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use weebo_kit_runtime::events;
 use weebo_kit_runtime::metrics::ReconcileMetrics;
+use weebo_kit_runtime::scope::KindScope;
+use weebo_kit_runtime::shared::SharedWatches;
 use weebo_kit_runtime::status::StatusUpdate;
 use weebo_kit_runtime::{Health, WatchScope};
 
@@ -92,6 +97,63 @@ pub struct Ctx {
     /// What the controllers watch (`WEEBO_WATCH_NAMESPACE`,
     /// `WEEBO_WATCH_LABEL_SELECTOR`): every watch goes through it.
     pub scope: WatchScope,
+    /// The binary's shared watches ([`spawn_watches`]): one per CR kind
+    /// for every controller and every store read
+    /// (`SharedWatches::default()`: each controller watches on its own).
+    pub watches: SharedWatches,
+}
+
+/// One watch per CR kind, on `scope`, for every controller (as its own
+/// kind or a referenced one) and the stores read in place of a LIST.
+/// Spawned before the lease is campaigned for: a standby keeps them warm.
+pub fn spawn_watches(client: &Client, scope: &WatchScope, health: &Arc<Health>) -> SharedWatches {
+    let mut watches = SharedWatches::default();
+    watches.spawn(
+        scope.api::<api::LocalInstance>(client.clone()),
+        scope,
+        health,
+        "AngosLocalInstance watch",
+    );
+    watches.spawn(
+        scope.api::<api::Repository>(client.clone()),
+        scope,
+        health,
+        "AngosRepository watch",
+    );
+    watches.spawn(
+        scope.api::<api::Identity>(client.clone()),
+        scope,
+        health,
+        "AngosIdentity watch",
+    );
+    watches.spawn(
+        scope.api::<api::Maintenance>(client.clone()),
+        scope,
+        health,
+        "AngosMaintenance watch",
+    );
+    watches
+}
+
+/// The objects of a kind the CRs reference, as touched (deleted ones
+/// included): its shared watch when the binary spawned one, else a watch
+/// of its own through the scope. What `watches_stream` takes, for a
+/// mapping behind a predicate (`WatchesIn::watches_in` has none).
+pub fn touched<K>(ctx: &Ctx, client: &Client) -> BoxStream<'static, Result<K, watcher::Error>>
+where
+    K: Resource<DynamicType = ()> + Clone + Debug + DeserializeOwned + Send + Sync + 'static,
+    K::Scope: KindScope,
+{
+    match ctx.watches.get::<K>() {
+        Some(shared) => shared.touched().boxed(),
+        None => watcher(
+            ctx.scope.api::<K>(client.clone()),
+            ctx.scope.watcher_config(),
+        )
+        .default_backoff()
+        .touched_objects()
+        .boxed(),
+    }
 }
 
 /// What the operator's environment sets (spec 6.11).

@@ -12,10 +12,10 @@ use application::use_cases::reconcile_repository::{
     RepositoryPass, reconcile_repository, release_repository,
 };
 use kube::api::Api;
+use kube::runtime::WatchStreamExt;
 use kube::runtime::controller::Action;
 use kube::runtime::finalizer::{Event as Finalizer, finalizer};
 use kube::runtime::reflector::ObjectRef;
-use kube::runtime::{WatchStreamExt, watcher};
 use kube::{Client, Resource, ResourceExt};
 use weebo_kit_runtime::status::StatusUpdate;
 
@@ -25,18 +25,14 @@ const KIND: &str = "AngosRepository";
 
 pub async fn run(client: Client, ctx: Arc<Ctx>) {
     let health = ctx.health.clone();
-    let results = super::controller(ctx.scope.api::<Repository>(client.clone()), &ctx.scope)
+    let results = ctx
+        .watches
+        .controller(ctx.scope.api::<Repository>(client.clone()), &ctx.scope)
         // Only when what the instance made of its repositories changes: its
         // other status writes (a reload being confirmed…) would wake them
         // all for nothing.
         .watches_stream(
-            watcher(
-                ctx.scope.api::<LocalInstance>(client),
-                ctx.scope.watcher_config(),
-            )
-            .default_backoff()
-            .touched_objects()
-            .predicate_filter(
+            super::touched::<LocalInstance>(&ctx, &client).predicate_filter(
                 |instance: &LocalInstance| {
                     super::hash_of(&instance.status.as_ref().map(|s| &s.repositories))
                 },

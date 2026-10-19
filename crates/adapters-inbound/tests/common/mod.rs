@@ -18,10 +18,24 @@ use weebo_kit_runtime::{Health, WatchScope};
 
 pub fn ctx(client: &Client, scope: WatchScope, logs: Arc<FakePodLogs>) -> (Arc<Ctx>, Arc<Health>) {
     let health = Arc::new(Health::default());
-    let instances = Arc::new(LocalInstanceDirectory::new(client.clone()).with_scope(
+    // One shared watch per kind, the stores read from them.
+    let watches = controller::spawn_watches(client, &scope, &health);
+    let mut instances = LocalInstanceDirectory::new(client.clone()).with_scope(
         scope.watched_namespace().map(String::from),
         scope.selector().cloned(),
-    ));
+    );
+    if let Some(shared) = watches.get::<api::LocalInstance>() {
+        instances = instances.with_store(shared.store());
+    }
+    let instances = Arc::new(instances);
+    let repositories = Arc::new(
+        KubeRepositories::new(client.clone())
+            .with_scope(
+                scope.watched_namespace().map(String::from),
+                scope.selector().cloned(),
+            )
+            .with_watches(watches.clone()),
+    );
     let ctx = Arc::new(Ctx {
         client: client.clone(),
         instances: instances.clone(),
@@ -31,14 +45,8 @@ pub fn ctx(client: &Client, scope: WatchScope, logs: Arc<FakePodLogs>) -> (Arc<C
         )),
         logs,
         credentials: Arc::new(KubeCredentials::new(client.clone())),
-        repositories: Arc::new(KubeRepositories::new(client.clone()).with_scope(
-            scope.watched_namespace().map(String::from),
-            scope.selector().cloned(),
-        )),
-        identities: Arc::new(KubeRepositories::new(client.clone()).with_scope(
-            scope.watched_namespace().map(String::from),
-            scope.selector().cloned(),
-        )),
+        repositories: repositories.clone(),
+        identities: repositories,
         identity_objects: Arc::new(KubeOwnedObjects::new(
             client.clone(),
             adapters_outbound::identity_settings(),
@@ -71,6 +79,7 @@ pub fn ctx(client: &Client, scope: WatchScope, logs: Arc<FakePodLogs>) -> (Arc<C
         shutdown: Shutdown::never(),
         health: health.clone(),
         scope,
+        watches,
     });
     (ctx, health)
 }

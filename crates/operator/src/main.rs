@@ -16,7 +16,7 @@ use api::LocalInstance;
 use kube::Client;
 use kube::runtime::events::{Recorder, Reporter};
 use weebo_kit_adapters::{K8sSecretStore, KubeOwnedObjects, KubePodLogs};
-use weebo_kit_runtime::store::spawn_reflector;
+use weebo_kit_runtime::shared::LISTED_TIMEOUT;
 use weebo_kit_runtime::{Health, WatchScope, leader, telemetry, webhook_server};
 
 /// Default `LEASE_NAME`. Keep it across releases: old and new pods of a
@@ -83,21 +83,19 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     let shutdown = Shutdown::on_termination()?;
     let health = Arc::new(Health::default());
 
-    // Every resolution reads the instances: one reflector.
-    let local_store = spawn_reflector(
-        scope.api::<LocalInstance>(client.clone()),
-        &scope,
-        health.clone(),
-        "AngosLocalInstance reflector",
+    // One watch per CR kind, shared by every controller and by the stores
+    // read in place of a LIST (instances, repositories, identities).
+    // Spawned now, before the lease: a standby keeps them warm, and the
+    // controllers start from stores that already listed.
+    let watches = controller::spawn_watches(&client, &scope, &health);
+    let mut instances = LocalInstanceDirectory::new(client.clone()).with_scope(
+        scope.watched_namespace().map(String::from),
+        scope.selector().cloned(),
     );
-    let instances = Arc::new(
-        LocalInstanceDirectory::new(client.clone())
-            .with_scope(
-                scope.watched_namespace().map(String::from),
-                scope.selector().cloned(),
-            )
-            .with_store(local_store),
-    );
+    if let Some(shared) = watches.get::<LocalInstance>() {
+        instances = instances.with_store(shared.store());
+    }
+    let instances = Arc::new(instances);
 
     let holder_id = std::env::var("HOSTNAME").unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
     let settings = settings_from_env()?;
@@ -108,10 +106,14 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     tracing::info!(?allowed_images, default_image = %settings.default_image, "instances");
     let credentials: Arc<KubeCredentials> = Arc::new(KubeCredentials::new(client.clone()));
     let cel: Arc<CelInterpreterChecker> = Arc::new(CelInterpreterChecker);
-    let repositories = Arc::new(KubeRepositories::new(client.clone()).with_scope(
-        scope.watched_namespace().map(String::from),
-        scope.selector().cloned(),
-    ));
+    let repositories = Arc::new(
+        KubeRepositories::new(client.clone())
+            .with_scope(
+                scope.watched_namespace().map(String::from),
+                scope.selector().cloned(),
+            )
+            .with_watches(watches.clone()),
+    );
     let admission = Arc::new(adapters_inbound::admission::AngosAdmission {
         credentials: credentials.clone(),
         cel: cel.clone(),
@@ -163,6 +165,7 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
         shutdown: shutdown.clone(),
         health: health.clone(),
         scope: scope.clone(),
+        watches,
     });
 
     // The HTTPS server (probes, the scope guard, and an admission webhook
@@ -179,8 +182,16 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
 
     // The controllers, in contrast, run on one replica at a time: two
     // active reconcilers would write the same objects.
+    // A replica campaigns once its shared watches listed (their LISTs done
+    // before the lease, not in the leader's first minute), or after
+    // LISTED_TIMEOUT: a watch that can't list is reported by /livez, not
+    // waited for.
+    let campaign = async {
+        ctx.watches.wait_listed(LISTED_TIMEOUT).await;
+        leader::acquire_leadership(&client, holder_id, DEFAULT_LEASE_NAME).await
+    };
     let leadership = tokio::select! {
-        leadership = leader::acquire_leadership(&client, holder_id, DEFAULT_LEASE_NAME) => leadership,
+        leadership = campaign => leadership,
         () = shutdown.wait() => {
             server.stopped().await;
             return Ok(());

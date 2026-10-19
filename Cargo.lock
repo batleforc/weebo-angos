@@ -12,6 +12,7 @@ dependencies = [
  "async-trait",
  "axum",
  "domain",
+ "futures",
  "k8s-openapi",
  "kube",
  "opentelemetry",
@@ -51,6 +52,7 @@ dependencies = [
  "weebo-kit-adapters",
  "weebo-kit-api",
  "weebo-kit-application",
+ "weebo-kit-runtime",
  "wiremock",
 ]
 
