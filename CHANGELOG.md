@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.1.4](https://github.com/batleforc/weebo-angos/compare/39c6796bdbcfd606bb887d920a9df1fd3ebe6e84..v0.1.4) - 2026-10-19
+#### Miscellaneous Chores
+- (**kit**) weebo-operator-kit v0.21.0, watches_in_filtered instead of the local touched (#17) - ([39c6796](https://github.com/batleforc/weebo-angos/commit/39c6796bdbcfd606bb887d920a9df1fd3ebe6e84)) - Maxime, Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.1.3](https://github.com/batleforc/weebo-angos/compare/e839e4c2613b3e3d8abd17a5d254f612d209406d..v0.1.3) - 2026-10-19
 #### Refactoring
 - (**controller**) one shared watch per kind (kit v0.20.0) (#16) - ([5d98746](https://github.com/batleforc/weebo-angos/commit/5d98746e38689fbabcb966a999dc59eb42e96ad3)) - Maxime, Claude Opus 5.5 (1M context)
