@@ -37,19 +37,108 @@ spec:
 
 | Field | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `access` | `object` | no | `{"browse":[],"delete":[],"pull":[],"push":[]}` | Who may do what (`access_policy`). |
-| `authorizationWebhook` | `string` | no |  | An authorization webhook of the instance (`spec.auth.webhooks[].name`) asked for this repository's requests instead of the default one. Unset: the instance's default (Angos has no way to turn it off for one repository). |
-| `downstreams` | `object[]` | no |  | Registries it replicates to (`[[downstream]]`). |
+| [`access`](#spec.access) | `object` | no | `{"browse":[],"delete":[],"pull":[],"push":[]}` | Who may do what (`access_policy`). |
+| `authorizationWebhook` | `string` | no |  | An authorization webhook of the instance (`spec.auth.webhooks[].name`) asked for this repository's requests instead of the default one. Unset: the instance's default (Angos has no way to turn it off for one repository).<br /><br />Constraints: `minLength: 1` |
+| [`downstreams`](#spec.downstreams) | `object[]` | no |  | Registries it replicates to (`[[downstream]]`). |
 | `eventWebhooks` | `string[]` | no |  | Event webhooks of the instance (`spec.eventWebhooks[].name`) told of this repository; not empty, it **replaces** the instance's default ones. |
 | `immutableTags` | `boolean` | no |  | `immutable_tags` (OR with the instance's). |
 | `immutableTagsExclusions` | `string[]` | no |  | `immutable_tags_exclusions`: regexes. Not empty, it **replaces** the instance's list. |
-| `index` | `object` | no |  | `index` policy: `default` (`index` or `skip`) and CEL rules on `image`; unset, the instance's. |
-| `instanceRef` | `object` | no |  | The instance serving it: unset, the only one of this namespace. An instance of another namespace must accept this one (`repositorySelector.namespaces`). |
+| [`index`](#spec.index) | `object` | no |  | `index` policy: `default` (`index` or `skip`) and CEL rules on `image`; unset, the instance's. |
+| [`instanceRef`](#spec.instanceRef) | `object` | no |  | The instance serving it: unset, the only one of this namespace. An instance of another namespace must accept this one (`repositorySelector.namespaces`). |
 | `mirrorOf` | `string` | no |  | `namespace`: the `?ns=` value it answers to as a mirror (Docker's mirror requests name the upstream registry). |
-| `prefix` | `string` | yes |  | The namespaces it covers: `<prefix>` and `<prefix>/…` (an OCI namespace: lowercase segments, no quote). **Immutable**: changing it would move the data out of the repository (delete and recreate). |
-| `retention` | `object` | no |  | `retention_policy`: CEL rules on `image`; a matching one keeps the image (OR with the instance's), `angos prune` deletes the others. |
-| `scan` | `object` | no |  | `scan` policy, replacing the instance's: needs the instance's `spec.scan`. |
-| `upstreams` | `object[]` | no | `[]` | Registries it caches from, tried in order (`[[upstream]]`): a pull-through cache, which refuses every push. |
+| `prefix` | `string` | yes |  | The namespaces it covers: `<prefix>` and `<prefix>/…` (an OCI namespace: lowercase segments, no quote). **Immutable**: changing it would move the data out of the repository (delete and recreate).<br /><br />Constraints: `pattern: ^[a-z0-9]+(?:(?:__\|[._]\|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:__\|[._]\|-+)[a-z0-9]+)*)*$`, `maxLength: 255` |
+| [`retention`](#spec.retention) | `object` | no |  | `retention_policy`: CEL rules on `image`; a matching one keeps the image (OR with the instance's), `angos prune` deletes the others. |
+| [`scan`](#spec.scan) | `object` | no |  | `scan` policy, replacing the instance's: needs the instance's `spec.scan`. |
+| [`upstreams`](#spec.upstreams) | `object[]` | no | `[]` | Registries it caches from, tried in order (`[[upstream]]`): a pull-through cache, which refuses every push. |
+
+**Rules**
+
+- a pull-through repository (upstreams) refuses every push: access.push and access.delete must be empty — `size(self.upstreams) == 0 || (size(self.access.push) == 0 && size(self.access.delete) == 0)`
+- `prefix`: prefix is immutable: delete the repository and create another — `self == oldSelf`
+
+### `spec.access` [#spec.access]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `browse` | `string[]` | no | `[]` | Who may list revisions and uploads. |
+| `delete` | `string[]` | no | `[]` | Who may delete manifests and blobs. |
+| `pull` | `string[]` | no | `[]` | Who may pull (manifests, blobs, referrers, tags). |
+| `push` | `string[]` | no | `[]` | Who may push. |
+| `rules` | `string[]` | no |  | More CEL rules (`request`, `identity`): a matching one allows. |
+
+### `spec.downstreams[]` [#spec.downstreams]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| [`credentialsSecretRef`](#spec.downstreams.credentialsSecretRef) | `object` | no |  |  |
+| `maxConcurrentPushes` | `integer` | no |  | Constraints: `minimum: 1` |
+| `mode` | `string` | no |  | `EventAndReconcile` (default), `EventOnly` or `ReconcileOnly`.<br /><br />Values: `"EventAndReconcile"`, `"EventOnly"`, `"ReconcileOnly"` |
+| `name` | `string` | yes |  | Unique in the repository: the replication's job key and metrics label.<br /><br />Constraints: `minLength: 1` |
+| `namespaceFilter` | `string[]` | no |  | Regexes of the namespaces replicated; empty: all. |
+| `prune` | `boolean` | no | `false` | Propagate deletions to the downstream: it needs the annotation `angos.weebo.io/allow-data-deletion: "true"` on the repository. |
+| `url` | `string` | yes |  | Constraints: `pattern: ^https?://` |
+
+### `spec.downstreams[].credentialsSecretRef` [#spec.downstreams.credentialsSecretRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `name` | `string` | yes |  |  |
+| `passwordKey` | `string` | no | `"password"` |  |
+| `usernameKey` | `string` | no | `"username"` |  |
+
+### `spec.index` [#spec.index]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `default` | `string` | no |  | What applies when no rule matches; a matching rule does the opposite.<br /><br />Values: `"Index"`, `"Skip"` |
+| `rules` | `string[]` | no |  |  |
+
+### `spec.instanceRef` [#spec.instanceRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `kind` | `string` | no |  | The kind of instance a reference designates.<br /><br />Values: `"Instance"`, `"LocalInstance"` |
+| `name` | `string` | yes |  | `metadata.name` of the instance. |
+| `namespace` | `string` | no |  | Namespace of a `LocalInstance`. Defaults to this object's own; required on a cluster-scoped object. Another namespace's local instance must share itself with this one (its `sharedWith`). |
+
+**Rules**
+
+- namespace only applies to kind LocalInstance — `!has(self.namespace) || !has(self.kind) || self.kind == 'LocalInstance'`
+
+### `spec.retention` [#spec.retention]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `rules` | `string[]` | no | `[]` |  |
+
+### `spec.scan` [#spec.scan]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `default` | `string` | no |  | What applies when no rule matches; a matching rule does the opposite.<br /><br />Values: `"Scan"`, `"Skip"` |
+| `rules` | `string[]` | no |  |  |
+
+**Rules**
+
+- a scan policy sets a default or rules — `has(self.default) || size(self.rules) > 0`
+
+### `spec.upstreams[]` [#spec.upstreams]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `connectTimeoutSecs` | `integer` | no |  | Angos: 30.<br /><br />Constraints: `minimum: 0` |
+| [`credentialsSecretRef`](#spec.upstreams.credentialsSecretRef) | `object` | no |  | Basic credentials (`username`, `password` keys), in a Secret of this namespace labelled `angos.weebo.io/credential: "true"`. |
+| `maxRedirect` | `integer` | no |  | Angos: 5.<br /><br />Constraints: `minimum: 0`, `maximum: 255` |
+| `readTimeoutSecs` | `integer` | no |  | Angos: 300.<br /><br />Constraints: `minimum: 0` |
+| `url` | `string` | yes |  | The registry, e.g. `https://registry-1.docker.io`; a path is the upstream namespace prefix.<br /><br />Constraints: `pattern: ^https?://` |
+
+### `spec.upstreams[].credentialsSecretRef` [#spec.upstreams.credentialsSecretRef]
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `name` | `string` | yes |  |  |
+| `passwordKey` | `string` | no | `"password"` |  |
+| `usernameKey` | `string` | no | `"username"` |  |
 
 ## Build a manifest
 
