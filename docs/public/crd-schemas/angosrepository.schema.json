@@ -2,6 +2,9 @@
   "apiVersion": "angos.weebo.io/v1alpha1",
   "kind": "AngosRepository",
   "scope": "Namespaced",
+  "served": [
+    "v1alpha1"
+  ],
   "description": "A repository of an Angos instance: the namespaces under its `prefix`,\nwho may pull, browse, push and delete there, where it caches from and\nreplicates to. Rendered into the instance's configuration by the\ninstance; `Ready` once every pod of the instance runs it.",
   "properties": {
     "access": {

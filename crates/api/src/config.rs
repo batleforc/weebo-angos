@@ -549,6 +549,7 @@ pub struct ClientTls {
 ]))]
 pub struct CaBundle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("x-weebo-link" = { "to": [{ "kind": "ConfigMap" }] }))]
     pub config_map_key_ref: Option<KeyRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret_key_ref: Option<LocalSecretKeyRef>,

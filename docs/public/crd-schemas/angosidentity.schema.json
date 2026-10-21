@@ -2,6 +2,9 @@
   "apiVersion": "angos.weebo.io/v1alpha1",
   "kind": "AngosIdentity",
   "scope": "Namespaced",
+  "served": [
+    "v1alpha1"
+  ],
   "description": "A Basic identity of an Angos instance (`[auth.identity]`): a robot, a\nCI, a scanner. The operator generates its password (or adopts one),\nhashes it with Argon2id for the instance's configuration, and writes the\nclear password to its targets once every pod of the instance accepts\nit. Angos verifies a Basic password on every request (≈ 19 MiB and tens\nof milliseconds each): workloads should rather use their\nServiceAccount's token (`auth.kubernetes`).",
   "properties": {
     "adoptSecretRef": {

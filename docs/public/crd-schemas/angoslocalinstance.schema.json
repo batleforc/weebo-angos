@@ -2,6 +2,9 @@
   "apiVersion": "angos.weebo.io/v1alpha1",
   "kind": "AngosLocalInstance",
   "scope": "Namespaced",
+  "served": [
+    "v1alpha1"
+  ],
   "description": "An Angos registry the operator runs in this namespace: its\n`Deployment`, its configuration (rendered from this spec, its\nrepositories and identities) and the objects around them. `Ready` tells\nwhether its pods run the desired configuration.",
   "properties": {
     "affinity": {

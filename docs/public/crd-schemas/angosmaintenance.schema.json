@@ -2,6 +2,9 @@
   "apiVersion": "angos.weebo.io/v1alpha1",
   "kind": "AngosMaintenance",
   "scope": "Namespaced",
+  "served": [
+    "v1alpha1"
+  ],
   "description": "A task of Angos's CLI on an instance of this namespace (`angos scrub`,\n`prune`, `reconcile …`), once or on a schedule, run as a `Job` with the\ninstance's image and configuration. The operator schedules it: at most\none run per due time, never two writing tasks at once on an instance,\nnone while it rolls out — and a prune never while a repository could\nlose its data (spec 6.6). Every task runs as a dry run unless\n`params.dryRun` is `false`.",
   "properties": {
     "instanceRef": {
