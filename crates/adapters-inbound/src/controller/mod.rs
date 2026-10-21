@@ -4,7 +4,7 @@
 
 use std::fmt::Debug;
 use std::sync::{Arc, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use api::Status;
 use api::status::Condition;
@@ -183,19 +183,29 @@ impl Error {
 }
 
 /// Every reconcile that errors out is announced by a `Warning` Event on
-/// its CR, then retried in ~30s (the kit's).
+/// its CR, then retried in ~30s, backing off while it keeps failing (the
+/// kit's). A cleanup waiting on its instance's rollout is read again soon,
+/// as [`requeue_after`] does: it is a wait, not a failure.
 pub fn error_policy<K>(obj: Arc<K>, err: &Error, ctx: Arc<Ctx>) -> Action
 where
     K: Resource<DynamicType = ()>,
 {
     let (reason, action) = err.reason();
-    weebo_kit_runtime::controller::retry_after_error(
+    let retry = weebo_kit_runtime::controller::retry_after_error(
         &ctx.recorder,
         obj.object_ref(&()),
         reason,
         action,
         err,
-    )
+    );
+    if matches!(
+        reason,
+        ReasonCode::ConfigPropagating | ReasonCode::UpgradeInProgress
+    ) {
+        Action::requeue(Duration::from_secs(15))
+    } else {
+        retry
+    }
 }
 
 /// Steady-state drift check after a success, a quick retry after a
