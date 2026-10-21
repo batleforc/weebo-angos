@@ -108,6 +108,10 @@ async fn reconcile(obj: Arc<Maintenance>, ctx: Arc<Ctx>) -> Result<Action, Error
     .await;
     super::record_reconcile(KIND, started, &report.outcome);
     super::metrics::record_maintenance(obj.spec.task, &previous, &report.status);
+    #[expect(
+        clippy::expect_used,
+        reason = "a status is a struct of serializable fields"
+    )]
     let mut fields = serde_json::to_value(&report.status)
         .expect("a status serializes")
         .as_object()

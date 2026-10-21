@@ -2,8 +2,6 @@
 //! test's choosing: the real adapters, but the cluster issuer's (envtest
 //! has none) and the logs (no kubelet) are in memory.
 
-#![allow(dead_code)]
-
 use std::sync::Arc;
 
 use adapters_inbound::controller::{self, Ctx, Settings, Shutdown};

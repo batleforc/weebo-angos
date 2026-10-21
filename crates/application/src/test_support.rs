@@ -2,6 +2,14 @@
 //! crates by the `test-support` feature): the kit's owned objects and pod
 //! logs, and the operator's own ports.
 
+// Test doubles, only built for tests (`cfg(test)` or the `test-support`
+// feature): a poisoned lock or an overflowing counter fails the test there.
+#![expect(
+    clippy::unwrap_used,
+    clippy::arithmetic_side_effects,
+    reason = "test doubles: a panic is a failed test"
+)]
+
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 

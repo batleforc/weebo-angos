@@ -780,12 +780,20 @@ impl Layers {
 }
 
 /// `table` as a TOML file.
+#[expect(
+    clippy::expect_used,
+    reason = "a toml::Table (string keys, TOML values) always serializes"
+)]
 pub fn render(table: &toml::Table) -> String {
     toml::to_string(table).expect("a TOML table renders")
 }
 
 impl AngosConfig {
     /// The whole file as one table.
+    #[expect(
+        clippy::expect_used,
+        reason = "the model is string-keyed tables of TOML values; every field is rendered by the tests"
+    )]
     pub fn to_table(&self) -> toml::Table {
         toml::Table::try_from(self).expect("the configuration model serializes to a TOML table")
     }

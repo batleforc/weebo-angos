@@ -318,6 +318,7 @@ where
         .unwrap_or_default();
     let mut fields = serde_json::Map::new();
     if let Some(instance) = &outcome.instance {
+        #[expect(clippy::expect_used, reason = "a BoundInstance is a struct of strings")]
         let instance = serde_json::to_value(instance).expect("a BoundInstance serializes");
         fields.insert("instance".into(), instance);
     }

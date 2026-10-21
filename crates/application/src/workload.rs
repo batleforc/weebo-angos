@@ -159,8 +159,8 @@ pub fn image(spec: &LocalInstanceSpec, default_image: &str) -> String {
 /// The tag of an image reference.
 pub fn tag(image: &str) -> &str {
     let name = image.split('@').next().unwrap_or(image);
-    match name.rfind(':') {
-        Some(at) if !name[at..].contains('/') => &name[at + 1..],
+    match name.rsplit_once(':') {
+        Some((_, tag)) if !tag.contains('/') => tag,
         _ => "latest",
     }
 }

@@ -122,6 +122,10 @@ fn undeclared(error: &ExecutionError) -> bool {
 }
 
 impl CelInterpreterChecker {
+    #[expect(
+        clippy::expect_used,
+        reason = "the variables are serde_json::Values built here, which always serialize"
+    )]
     fn contexts(rule_context: RuleContext) -> Vec<(String, Context<'static>)> {
         let mut out = Vec::new();
         match rule_context {
@@ -137,7 +141,10 @@ impl CelInterpreterChecker {
                             .expect("an identity serializes");
                         context.add_function("has_repository_policy", || true);
                         out.push((
-                            format!("{who} asking {}", request["action"].as_str().unwrap_or("")),
+                            format!(
+                                "{who} asking {}",
+                                request.get("action").and_then(|a| a.as_str()).unwrap_or("")
+                            ),
                             context,
                         ));
                     }

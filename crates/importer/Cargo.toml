@@ -21,3 +21,6 @@ serde_norway = { workspace = true }
 [dev-dependencies]
 application = { workspace = true }
 adapters-outbound = { workspace = true }
+
+[lints]
+workspace = true

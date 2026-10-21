@@ -108,13 +108,13 @@ async fn tail(ports: &MaintenancePorts<'_>, namespace: &str, pod: Option<&str>) 
         .map(|l| {
             serde_json::from_str::<serde_json::Value>(&l.text)
                 .ok()
-                .and_then(|v| v["fields"]["message"].as_str().map(String::from))
+                .and_then(|v| v.pointer("/fields/message")?.as_str().map(String::from))
                 .unwrap_or_else(|| l.text.clone())
         })
         .map(|m| crate::reload::redact(&m))
         .collect();
     let start = messages.len().saturating_sub(TAIL_LINES);
-    Some(messages[start..].join("\n"))
+    Some(messages.get(start..).unwrap_or_default().join("\n"))
 }
 
 async fn run(
@@ -158,7 +158,7 @@ async fn run(
                     None,
                     Some(format!("the Job {} is gone", run.job_name)),
                 ));
-                status.failure_count += 1;
+                status.failure_count = status.failure_count.saturating_add(1);
             }
             Some(job) if job.active || !(job.succeeded || job.failed) => {
                 advisories.push(advisory(
@@ -178,7 +178,7 @@ async fn run(
                     RunState::Failed
                 };
                 if state != RunState::Succeeded {
-                    status.failure_count += 1;
+                    status.failure_count = status.failure_count.saturating_add(1);
                 }
                 if state == RunState::Succeeded && run.dry_run {
                     status.last_dry_run = Some(DryRun {
@@ -239,7 +239,11 @@ async fn run(
             None => status.last_run.is_none() && status.last_skip_time.is_none(),
         };
     if let Some(next) = next.filter(|n| *n > pass.now) {
-        report.due_in = Some(pass.now.duration_until(next).as_secs().max(1) as u64);
+        report.due_in = Some(
+            u64::try_from(pass.now.duration_until(next).as_secs())
+                .unwrap_or(1)
+                .max(1),
+        );
     }
 
     // 3. May it run?
@@ -323,7 +327,7 @@ async fn run(
                 message: None,
                 dry_run: spec.params.dry_run,
             });
-            status.run_count += 1;
+            status.run_count = status.run_count.saturating_add(1);
             if asked {
                 status.run_now = run_now;
             }

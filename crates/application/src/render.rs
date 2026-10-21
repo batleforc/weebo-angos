@@ -181,7 +181,7 @@ impl std::fmt::Display for RenderError {
         let shown: Vec<&str> = self.0.iter().take(5).map(String::as_str).collect();
         write!(f, "{}", shown.join("; "))?;
         if self.0.len() > 5 {
-            write!(f, " and {} more", self.0.len() - 5)?;
+            write!(f, " and {} more", self.0.len().saturating_sub(5))?;
         }
         Ok(())
     }
@@ -561,6 +561,10 @@ fn lookup<'a>(table: &'a toml::Table, path: &[&str]) -> Option<&'a toml::Value> 
 /// `extraConfig` as a TOML table, refused where it would override what the
 /// operator renders, a startup key, or anything of the startup layer.
 fn extra(spec: &LocalInstanceSpec, rendered: &toml::Table) -> Result<toml::Table, Vec<String>> {
+    #[expect(
+        clippy::expect_used,
+        reason = "a map of serde_json::Value always serializes to JSON"
+    )]
     let value = serde_json::to_value(&spec.extra_config).expect("a JSON map serializes");
     let table: toml::Table = toml::Table::try_from(value)
         .map_err(|e| vec![format!("spec.extraConfig is not TOML: {e}")])?;
@@ -576,11 +580,11 @@ fn extra(spec: &LocalInstanceSpec, rendered: &toml::Table) -> Result<toml::Table
             problems.push(format!(
                 "spec.extraConfig.{path}: a startup key, set through the typed fields"
             ));
-        } else if keys
-            .iter()
-            .enumerate()
-            .any(|(i, _)| lookup(rendered, &keys[..=i]).is_some_and(|v| !v.is_table()))
-        {
+        } else if keys.iter().enumerate().any(|(i, _)| {
+            keys.get(..=i)
+                .and_then(|prefix| lookup(rendered, prefix))
+                .is_some_and(|v| !v.is_table())
+        }) {
             problems.push(format!(
                 "spec.extraConfig.{path}: rendered from a typed field of the spec, set it there"
             ));

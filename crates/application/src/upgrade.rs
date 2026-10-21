@@ -76,7 +76,7 @@ pub fn check(
              {to} doesn't read; {lift}"
         )));
     }
-    if target.major != running.major || target.minor > running.minor + 1 {
+    if target.major != running.major || target.minor > running.minor.saturating_add(1) {
         return Err(UpgradeRefused(format!(
             "Angos {current} → {to} skips a minor version: upgrade one minor at a time, or {lift}"
         )));

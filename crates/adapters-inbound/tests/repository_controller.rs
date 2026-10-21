@@ -5,6 +5,8 @@
 //! (`PrefixConflict`), one whose rule Angos's engine refuses
 //! (`InvalidSpec`), and a namespace the instance doesn't accept.
 
+#![expect(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
+
 use std::time::Duration;
 
 use adapters_inbound::controller;
@@ -54,7 +56,11 @@ async fn reason_is(api: &Api<Repository>, name: &str, wanted: &str) {
 
 #[tokio::test]
 async fn repositories_are_rendered_into_their_instance() {
-    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    // Another test of this binary may have installed one first.
+    tracing_subscriber::fmt()
+        .with_test_writer()
+        .try_init()
+        .unwrap_or_default();
     let cluster = testkit::envtest::start().await;
     let client = cluster.client();
     namespace(&client, "team").await;

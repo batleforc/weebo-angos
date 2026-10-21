@@ -13,6 +13,8 @@
 //! without failing; `WEEBO_PERF_BASELINE=<previous json>` adds the change
 //! from a previous run. The report lands in `target/perf/`.
 
+#![expect(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
+
 use std::time::{Duration, Instant};
 
 use api::{LocalInstance, Repository};
@@ -187,7 +189,7 @@ async fn cycle(
 #[tokio::test]
 #[ignore = "a perf run (minutes, release build): `task perf`"]
 async fn the_operator_fits_a_small_cluster() {
-    let objects = env_or("PERF_OBJECTS", 200) as usize;
+    let objects = usize::try_from(env_or("PERF_OBJECTS", 200)).unwrap();
     let idle = Duration::from_secs(env_or("PERF_IDLE_SECS", 30));
     let timeout = Duration::from_secs(300);
 

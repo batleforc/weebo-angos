@@ -12,13 +12,26 @@ use k8s_openapi::jiff::{Timestamp, ToSpan};
 #[error("{0}")]
 pub struct ScheduleError(pub String);
 
+/// Values `0..=63` of a field, one bit each.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Set(u64);
+
+impl Set {
+    fn has(self, n: i8) -> bool {
+        u32::try_from(n)
+            .ok()
+            .and_then(|n| self.0.checked_shr(n))
+            .is_some_and(|bits| bits & 1 == 1)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Schedule {
-    minutes: Vec<bool>,
-    hours: Vec<bool>,
-    days: Vec<bool>,
-    months: Vec<bool>,
-    weekdays: Vec<bool>,
+    minutes: Set,
+    hours: Set,
+    days: Set,
+    months: Set,
+    weekdays: Set,
     /// Day-of-month written `*`.
     any_day: bool,
     /// Day-of-week written `*`.
@@ -26,8 +39,8 @@ pub struct Schedule {
 }
 
 /// Parses one field, values in `min..=max`.
-fn field(text: &str, min: u32, max: u32, name: &str) -> Result<Vec<bool>, String> {
-    let mut set = vec![false; max as usize + 1];
+fn field(text: &str, min: u32, max: u32, name: &str) -> Result<Set, String> {
+    let mut set = 0u64;
     for part in text.split(',') {
         let (range, step) = match part.split_once('/') {
             Some((range, step)) => {
@@ -65,10 +78,10 @@ fn field(text: &str, min: u32, max: u32, name: &str) -> Result<Vec<bool>, String
             return Err(format!("{name}: {from}-{to} is empty"));
         }
         for n in (from..=to).step_by(step as usize) {
-            set[n as usize] = true;
+            set |= 1u64.checked_shl(n).unwrap_or(0);
         }
     }
-    Ok(set)
+    Ok(Set(set))
 }
 
 impl Schedule {
@@ -84,11 +97,9 @@ impl Schedule {
                 fields.len()
             ));
         };
-        let mut weekdays = field(weekday, 0, 7, "day-of-week")?;
-        if weekdays[7] {
-            weekdays[0] = true;
-        }
-        weekdays.truncate(7);
+        let weekdays = field(weekday, 0, 7, "day-of-week")?;
+        // 7 is Sunday too.
+        let weekdays = Set((weekdays.0 | u64::from(weekdays.has(7))) & 0x7f);
         Ok(Self {
             minutes: field(minute, 0, 59, "minute")?,
             hours: field(hour, 0, 23, "hour")?,
@@ -103,8 +114,8 @@ impl Schedule {
     }
 
     fn day_matches(&self, date: Date) -> bool {
-        let day = self.days[date.day() as usize];
-        let weekday = self.weekdays[date.weekday().to_sunday_zero_offset() as usize];
+        let day = self.days.has(date.day());
+        let weekday = self.weekdays.has(date.weekday().to_sunday_zero_offset());
         match (self.any_day, self.any_weekday) {
             (false, false) => day || weekday,
             _ => day && weekday,
@@ -125,7 +136,7 @@ impl Schedule {
         let limit = start.date().checked_add(5.years()).ok()?;
         while at.date() <= limit {
             let date = at.date();
-            if !self.months[date.month() as usize] {
+            if !self.months.has(date.month()) {
                 let first = Date::new(date.year(), date.month(), 1).ok()?;
                 at = first
                     .checked_add(1.month())
@@ -140,13 +151,13 @@ impl Schedule {
                     .to_datetime(Time::midnight());
                 continue;
             }
-            if !self.hours[at.hour() as usize] {
+            if !self.hours.has(at.hour()) {
                 at = DateTime::from_parts(date, Time::new(at.hour(), 0, 0, 0).ok()?)
                     .checked_add(1.hour())
                     .ok()?;
                 continue;
             }
-            if !self.minutes[at.minute() as usize] {
+            if !self.minutes.has(at.minute()) {
                 at = at.checked_add(1.minute()).ok()?;
                 continue;
             }

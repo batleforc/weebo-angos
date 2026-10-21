@@ -145,8 +145,9 @@ impl ClusterIssuer for KubeClusterIssuer {
                     .request(request)
                     .await
                     .map_err(crate::api_error("the API server's OIDC discovery"))?;
-                discovery["issuer"]
-                    .as_str()
+                discovery
+                    .get("issuer")
+                    .and_then(serde_json::Value::as_str)
                     .map(String::from)
                     .ok_or_else(|| {
                         ApiError::Failed("the API server's OIDC discovery has no issuer".into())
@@ -161,12 +162,20 @@ impl ClusterIssuer for KubeClusterIssuer {
 pub struct RandomKeys;
 
 impl KeyGenerator for RandomKeys {
+    #[expect(
+        clippy::expect_used,
+        reason = "getrandom fails only without an OS entropy source: no key beats a weak one"
+    )]
     fn token_key(&self) -> String {
         let mut key = [0u8; 32];
         getrandom::fill(&mut key).expect("the OS provides randomness");
         base64::engine::general_purpose::STANDARD.encode(key)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "getrandom fails only without an OS entropy source: no password beats a weak one"
+    )]
     fn password(&self) -> String {
         let mut bytes = [0u8; 32];
         getrandom::fill(&mut bytes).expect("the OS provides randomness");
@@ -179,6 +188,11 @@ impl KeyGenerator for RandomKeys {
 pub struct Argon2Hasher;
 
 impl application::ports::PasswordHasher for Argon2Hasher {
+    #[expect(
+        clippy::expect_used,
+        reason = "constant valid parameters; hashing then fails only on a password over 4 GiB, \
+                  beyond any Secret"
+    )]
     fn hash(&self, password: &str) -> String {
         use argon2::password_hash::{PasswordHasher as _, SaltString, rand_core::OsRng};
         let params = argon2::Params::new(19_456, 2, 1, None).expect("Angos's parameters are valid");

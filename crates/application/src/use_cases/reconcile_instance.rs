@@ -114,6 +114,10 @@ fn credential_failure(e: CredentialError) -> Failure {
 }
 
 /// The status fields a pass writes, for a merge patch (`null` clears).
+#[expect(
+    clippy::expect_used,
+    reason = "InstanceStatus is a struct of serializable fields: always a JSON object"
+)]
 pub fn status_fields(status: &InstanceStatus) -> serde_json::Map<String, serde_json::Value> {
     let mut value = serde_json::to_value(status).expect("a status serializes");
     let map = value.as_object_mut().expect("a status is an object");
@@ -426,7 +430,9 @@ async fn policies(
                 .or_insert_with(|| pass.now.to_string());
         }
     }
-    let keep = SignedDuration::from_hours(2 * i64::from(spec.prune_lock.window_hours.max(24)));
+    let keep = SignedDuration::from_hours(
+        i64::from(spec.prune_lock.window_hours.max(24)).saturating_mul(2),
+    );
     status.released_repositories.retain(|key, at| {
         !status.repositories.contains_key(key)
             && at
@@ -853,12 +859,9 @@ async fn run(
         && time(&status.last_rejection_time)
             .is_some_and(|at| pass.now.duration_since(at) < RETRY_REJECTED);
     let held = recently_rejected && applied_file.is_some();
-    let target = if held {
-        applied_file
-            .clone()
-            .expect("held only with an applied file")
-    } else {
-        rendered.hot_file.clone()
+    let target = match &applied_file {
+        Some(applied) if held => applied.clone(),
+        _ => rendered.hot_file.clone(),
     };
     let target_hash = render::hot_hash_of(&target);
     let current = ports
@@ -921,7 +924,7 @@ async fn run(
     {
         up.failure = None;
         up.job = None;
-        up.attempt += 1;
+        up.attempt = up.attempt.saturating_add(1);
         up.retried = Some(retry.clone());
         up.since = pass.now.to_string();
     }
@@ -1138,7 +1141,7 @@ async fn run(
             ));
         }
         let ready = on_boot.iter().filter(|p| p.ready).count();
-        let expected = replicas + worker.map_or(0, |w| w.replicas);
+        let expected = replicas.saturating_add(worker.map_or(0, |w| w.replicas));
         return Err(Failure::new(
             ReasonCode::WorkloadNotReady,
             format!(

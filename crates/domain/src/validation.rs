@@ -133,6 +133,10 @@ impl std::fmt::Display for Violation {
 }
 
 /// Angos's `Namespace` (`crates/oci/src/types/namespace.rs:11-19`).
+#[expect(
+    clippy::expect_used,
+    reason = "a literal pattern, compiled by the tests of is_namespace"
+)]
 static NAMESPACE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"^[a-z0-9]+(?:(?:__|[._]|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:__|[._]|-+)[a-z0-9]+)*)*$",
@@ -141,6 +145,10 @@ static NAMESPACE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// An HTTP header name (RFC 9110 token).
+#[expect(
+    clippy::expect_used,
+    reason = "a literal pattern, compiled by the test `forward_headers`"
+)]
 static HEADER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$").expect("the header pattern compiles")
 });
@@ -461,8 +469,10 @@ pub fn validate(config: &AngosConfig) -> Vec<Violation> {
     }
     let mut namespaces: BTreeMap<String, &str> = BTreeMap::new();
     let prefixes: Vec<&String> = config.repository.keys().collect();
-    for (i, a) in prefixes.iter().enumerate() {
-        for b in &prefixes[i + 1..] {
+    let mut rest = prefixes.as_slice();
+    while let Some((a, tail)) = rest.split_first() {
+        rest = tail;
+        for b in tail {
             if belongs_to(a, b) || belongs_to(b, a) {
                 c.fail(
                     PREFIX_OVERLAP,
