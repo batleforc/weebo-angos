@@ -152,5 +152,5 @@ async fn apply(api: &Api<Identity>, identity: &Identity, ctx: &Ctx) -> Result<Ac
         )
         .await;
     }
-    Ok(super::requeue_waiting(&report.outcome))
+    Ok(super::requeue_waiting(identity, &report.outcome))
 }

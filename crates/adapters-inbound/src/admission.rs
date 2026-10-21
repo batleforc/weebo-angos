@@ -43,8 +43,8 @@ impl Admission for AngosAdmission {
             "AngosLocalInstance" => {}
             "AngosRepository" => return self.admit_repository(namespace, object).await,
             "AngosMaintenance" => {
-                let maintenance: api::Maintenance =
-                    typed(object).map_err(|e| Denial::new(ReasonCode::InvalidSpec, e))?;
+                let maintenance: api::Maintenance = typed(object)
+                    .map_err(|e| Denial::new(ReasonCode::InvalidSpec, e.to_string()))?;
                 if let Some(schedule) = &maintenance.spec.schedule {
                     application::cron::Schedule::parse(schedule).map_err(|e| {
                         Denial::new(ReasonCode::InvalidSpec, format!("spec.schedule: {e}"))
@@ -60,7 +60,7 @@ impl Admission for AngosAdmission {
             }
         }
         let instance: LocalInstance =
-            typed(object).map_err(|e| Denial::new(ReasonCode::InvalidSpec, e))?;
+            typed(object).map_err(|e| Denial::new(ReasonCode::InvalidSpec, e.to_string()))?;
         let name = object.metadata.name.clone().unwrap_or_default();
         check_instance(
             &name,
@@ -116,7 +116,7 @@ impl AngosAdmission {
         object: &DynamicObject,
     ) -> Result<(), Denial<ReasonCode>> {
         let repo: Repository =
-            typed(object).map_err(|e| Denial::new(ReasonCode::InvalidSpec, e))?;
+            typed(object).map_err(|e| Denial::new(ReasonCode::InvalidSpec, e.to_string()))?;
         let name = object.metadata.name.clone().unwrap_or_default();
         let recorded = repo.status.as_ref().and_then(|s| s.common.instance.clone());
         // Not resolvable yet (no instance): the spec alone is checked, the

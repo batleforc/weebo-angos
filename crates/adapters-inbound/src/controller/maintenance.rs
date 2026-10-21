@@ -141,6 +141,6 @@ async fn reconcile(obj: Arc<Maintenance>, ctx: Arc<Ctx>) -> Result<Action, Error
     }
     Ok(match report.due_in {
         Some(due) => Action::requeue(Duration::from_secs(due.clamp(1, 300))),
-        None => super::requeue_after(&report.outcome),
+        None => super::requeue_after(obj.as_ref(), &report.outcome),
     })
 }

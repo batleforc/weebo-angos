@@ -199,8 +199,8 @@ where
 }
 
 /// Steady-state drift check after a success, a quick retry after a
-/// failure (both jittered — the kit's).
-pub fn requeue_after(outcome: &Outcome) -> Action {
+/// failure, backing off while `obj` keeps failing (jittered — the kit's).
+pub fn requeue_after<K: Resource>(obj: &K, outcome: &Outcome) -> Action {
     match &outcome.ready {
         // A reload being confirmed (its logs), an upgrade's Job (not
         // watched): read again soon. A rollout's progress comes through the
@@ -211,28 +211,30 @@ pub fn requeue_after(outcome: &Outcome) -> Action {
                 ReasonCode::ConfigPropagating | ReasonCode::UpgradeInProgress
             ) =>
         {
-            weebo_kit_runtime::controller::requeue_after(false, Some(15))
+            weebo_kit_runtime::controller::requeue_after(obj, false, Some(15))
         }
         Err(f) if f.reason == ReasonCode::WorkloadNotReady => {
-            weebo_kit_runtime::controller::requeue_after(true, None)
+            weebo_kit_runtime::controller::requeue_after(obj, true, None)
         }
-        Err(f) => weebo_kit_runtime::controller::requeue_after(f.reason.needs_a_change(), None),
+        Err(f) => {
+            weebo_kit_runtime::controller::requeue_after(obj, f.reason.needs_a_change(), None)
+        }
         Ok(_)
             if outcome
                 .advisories
                 .iter()
                 .any(|a| a.reason == ReasonCode::StorageChangePending) =>
         {
-            weebo_kit_runtime::controller::requeue_after(false, None)
+            weebo_kit_runtime::controller::requeue_after(obj, false, None)
         }
-        Ok(_) => weebo_kit_runtime::controller::requeue_after(true, None),
+        Ok(_) => weebo_kit_runtime::controller::requeue_after(obj, true, None),
     }
 }
 
 /// [`requeue_after`] for what waits on its instance (a repository, an
 /// identity): the instance's status changes wake it through the watch, the
 /// steady interval is the fallback.
-pub fn requeue_waiting(outcome: &Outcome) -> Action {
+pub fn requeue_waiting<K: Resource>(obj: &K, outcome: &Outcome) -> Action {
     match &outcome.ready {
         Err(f)
             if matches!(
@@ -240,9 +242,9 @@ pub fn requeue_waiting(outcome: &Outcome) -> Action {
                 ReasonCode::ConfigPropagating | ReasonCode::WorkloadNotReady
             ) =>
         {
-            weebo_kit_runtime::controller::requeue_after(true, None)
+            weebo_kit_runtime::controller::requeue_after(obj, true, None)
         }
-        _ => requeue_after(outcome),
+        _ => requeue_after(obj, outcome),
     }
 }
 

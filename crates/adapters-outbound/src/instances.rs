@@ -45,7 +45,7 @@ impl LocalInstanceDirectory {
     /// The instance `bound` designates, `None` when it is gone (or out of
     /// scope).
     pub async fn get(&self, bound: &BoundInstance) -> Result<Option<LocalInstance>, String> {
-        self.instances.get(bound).await
+        self.instances.get(bound).await.map_err(|e| e.to_string())
     }
 
     /// Resolves a repository or an identity of `namespace`: an instance of
