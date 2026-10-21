@@ -2,6 +2,14 @@
 //! crates by the `test-support` feature): the kit's owned objects and pod
 //! logs, and the operator's own ports.
 
+// Test doubles, only built for tests (`cfg(test)` or the `test-support`
+// feature): a poisoned lock or an overflowing counter fails the test there.
+#![expect(
+    clippy::unwrap_used,
+    clippy::arithmetic_side_effects,
+    reason = "test doubles: a panic is a failed test"
+)]
+
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
@@ -100,8 +108,10 @@ pub struct FakeIssuer(pub Option<String>);
 
 #[async_trait::async_trait]
 impl ClusterIssuer for FakeIssuer {
-    async fn issuer(&self) -> Result<String, String> {
-        self.0.clone().ok_or_else(|| "forbidden".to_string())
+    async fn issuer(&self) -> Result<String, crate::ports::ApiError> {
+        self.0
+            .clone()
+            .ok_or_else(|| crate::ports::ApiError::Denied("forbidden".into()))
     }
 }
 
@@ -144,7 +154,7 @@ impl crate::ports::IdentityDirectory for FakeIdentities {
         &self,
         _instance: &crate::ports::Owner,
         _selector: &api::local_instance::RepositorySelector,
-    ) -> Result<Vec<crate::identities::IdentityView>, String> {
+    ) -> Result<Vec<crate::identities::IdentityView>, crate::ports::ApiError> {
         Ok(self.0.lock().unwrap().clone())
     }
 }
@@ -160,7 +170,7 @@ impl StatusLedger for FakeLedger {
         _namespace: &str,
         _name: &str,
         fields: serde_json::Map<String, serde_json::Value>,
-    ) -> Result<(), String> {
+    ) -> Result<(), crate::ports::ApiError> {
         self.0.lock().unwrap().push(fields);
         Ok(())
     }
@@ -205,7 +215,7 @@ impl crate::ports::RepositoryDirectory for FakeRepositories {
         &self,
         _instance: &crate::ports::Owner,
         _selector: &api::local_instance::RepositorySelector,
-    ) -> Result<Vec<crate::repositories::RepositoryView>, String> {
+    ) -> Result<Vec<crate::repositories::RepositoryView>, crate::ports::ApiError> {
         Ok(self.0.lock().unwrap().clone())
     }
 }
@@ -216,7 +226,11 @@ pub struct FakeJobs(pub Mutex<BTreeMap<String, crate::ports::JobState>>);
 
 #[async_trait::async_trait]
 impl crate::ports::Jobs for FakeJobs {
-    async fn job(&self, _: &str, name: &str) -> Result<Option<crate::ports::JobState>, String> {
+    async fn job(
+        &self,
+        _: &str,
+        name: &str,
+    ) -> Result<Option<crate::ports::JobState>, crate::ports::ApiError> {
         Ok(self.0.lock().unwrap().get(name).cloned())
     }
 }
@@ -227,7 +241,7 @@ pub struct FakeMaintenances(pub Mutex<Vec<api::Maintenance>>);
 
 #[async_trait::async_trait]
 impl crate::ports::MaintenanceDirectory for FakeMaintenances {
-    async fn in_namespace(&self, _: &str) -> Result<Vec<api::Maintenance>, String> {
+    async fn in_namespace(&self, _: &str) -> Result<Vec<api::Maintenance>, crate::ports::ApiError> {
         Ok(self.0.lock().unwrap().clone())
     }
 }

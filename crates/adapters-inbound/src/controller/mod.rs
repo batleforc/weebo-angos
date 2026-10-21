@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 use api::Status;
 use api::status::Condition;
 use application::ports::{
-    BoundInstance, ClusterIssuer, Credentials, InstanceDirectory, KeyGenerator, OwnedObjects,
-    PodLogs,
+    ApiError, BoundInstance, ClusterIssuer, Credentials, InstanceDirectory, KeyGenerator,
+    OwnedObjects, PodLogs,
 };
 use application::use_cases::Outcome;
 use domain::Failure;
@@ -97,6 +97,18 @@ pub struct Ctx {
     /// for every controller and every store read
     /// (`SharedWatches::default()`: each controller watches on its own).
     pub watches: SharedWatches,
+}
+
+/// A failed status record as the ports' [`ApiError`]: a 401/403 (the
+/// operator's RBAC) kept apart from the rest.
+fn api_error(what: impl std::fmt::Display) -> impl FnOnce(kube::Error) -> ApiError {
+    move |e| {
+        let message = format!("{what}: {e}");
+        match &e {
+            kube::Error::Api(s) if s.code == 401 || s.code == 403 => ApiError::Denied(message),
+            _ => ApiError::Failed(message),
+        }
+    }
 }
 
 /// One watch per CR kind, on `scope`, for every controller (as its own
@@ -306,6 +318,7 @@ where
         .unwrap_or_default();
     let mut fields = serde_json::Map::new();
     if let Some(instance) = &outcome.instance {
+        #[expect(clippy::expect_used, reason = "a BoundInstance is a struct of strings")]
         let instance = serde_json::to_value(instance).expect("a BoundInstance serializes");
         fields.insert("instance".into(), instance);
     }

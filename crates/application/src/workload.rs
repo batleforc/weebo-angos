@@ -159,8 +159,8 @@ pub fn image(spec: &LocalInstanceSpec, default_image: &str) -> String {
 /// The tag of an image reference.
 pub fn tag(image: &str) -> &str {
     let name = image.split('@').next().unwrap_or(image);
-    match name.rfind(':') {
-        Some(at) if !name[at..].contains('/') => &name[at + 1..],
+    match name.rsplit_once(':') {
+        Some((_, tag)) if !tag.contains('/') => tag,
         _ => "latest",
     }
 }
@@ -479,7 +479,9 @@ fn deployment(input: &WorkloadInput<'_>, role: Role) -> Deployment {
     pod_labels.extend(spec.pod_labels.clone());
     pod_labels.insert("app.kubernetes.io/component".into(), role.as_str().into());
 
-    let drain = spec.global.shutdown_drain_secs.unwrap_or(30) as i64;
+    // The schema caps it; an older object past the cap saturates instead
+    // of wrapping into a negative grace period.
+    let drain = i64::try_from(spec.global.shutdown_drain_secs.unwrap_or(30)).unwrap_or(i64::MAX);
     let scheme = if tls { "HTTPS" } else { "HTTP" };
     let strategy = if single_writer(spec) && role == Role::Server {
         DeploymentStrategy {
@@ -618,7 +620,7 @@ fn deployment(input: &WorkloadInput<'_>, role: Role) -> Deployment {
                     priority_class_name: spec.priority_class_name.clone(),
                     termination_grace_period_seconds: Some(
                         spec.termination_grace_period_seconds
-                            .unwrap_or(3 * drain + 10),
+                            .unwrap_or(drain.saturating_mul(3).saturating_add(10)),
                     ),
                     volumes: Some(volumes),
                     containers: vec![container],

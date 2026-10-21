@@ -120,10 +120,9 @@ async fn apply(obj: Arc<Repository>, ctx: Arc<Ctx>) -> Result<Action, Error> {
     super::record_reconcile(KIND, started, &report.outcome);
     let mut fields = serde_json::Map::new();
     if let Some(instance) = &report.outcome.instance {
-        fields.insert(
-            "instance".into(),
-            serde_json::to_value(instance).expect("a BoundInstance serializes"),
-        );
+        #[expect(clippy::expect_used, reason = "a BoundInstance is a struct of strings")]
+        let instance = serde_json::to_value(instance).expect("a BoundInstance serializes");
+        fields.insert("instance".into(), instance);
     }
     fields.insert("rendered".into(), report.rendered.into());
     fields.insert(

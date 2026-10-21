@@ -21,7 +21,7 @@ use domain::{Advisory, Failure};
 use k8s_openapi::jiff::Timestamp;
 use weebo_kit_application::workload::LogQuery;
 
-use super::{Outcome, instance_failure, workload_failure};
+use super::{Outcome, api_failure, instance_failure, workload_failure};
 use crate::cron::Schedule;
 use crate::ports::{
     AttachedInstances, Jobs, MaintenanceDirectory, OwnedObjects, Owner, PodLogs, StatusLedger,
@@ -108,13 +108,13 @@ async fn tail(ports: &MaintenancePorts<'_>, namespace: &str, pod: Option<&str>) 
         .map(|l| {
             serde_json::from_str::<serde_json::Value>(&l.text)
                 .ok()
-                .and_then(|v| v["fields"]["message"].as_str().map(String::from))
+                .and_then(|v| v.pointer("/fields/message")?.as_str().map(String::from))
                 .unwrap_or_else(|| l.text.clone())
         })
         .map(|m| crate::reload::redact(&m))
         .collect();
     let start = messages.len().saturating_sub(TAIL_LINES);
-    Some(messages[start..].join("\n"))
+    Some(messages.get(start..).unwrap_or_default().join("\n"))
 }
 
 async fn run(
@@ -143,7 +143,7 @@ async fn run(
             .jobs
             .job(&owner.namespace, &run.job_name)
             .await
-            .map_err(|e| Failure::new(ReasonCode::KubernetesApiError, e))?;
+            .map_err(api_failure)?;
         let finished = |state: RunState, exit_code: Option<i32>, message: Option<String>| Run {
             state,
             completion_time: Some(pass.now.to_string()),
@@ -158,7 +158,7 @@ async fn run(
                     None,
                     Some(format!("the Job {} is gone", run.job_name)),
                 ));
-                status.failure_count += 1;
+                status.failure_count = status.failure_count.saturating_add(1);
             }
             Some(job) if job.active || !(job.succeeded || job.failed) => {
                 advisories.push(advisory(
@@ -178,7 +178,7 @@ async fn run(
                     RunState::Failed
                 };
                 if state != RunState::Succeeded {
-                    status.failure_count += 1;
+                    status.failure_count = status.failure_count.saturating_add(1);
                 }
                 if state == RunState::Succeeded && run.dry_run {
                     status.last_dry_run = Some(DryRun {
@@ -212,7 +212,7 @@ async fn run(
         .instances
         .instance(&bound)
         .await
-        .map_err(|e| Failure::new(ReasonCode::KubernetesApiError, e))?
+        .map_err(api_failure)?
         .ok_or_else(|| Failure::new(ReasonCode::InstanceNotFound, format!("{bound} is gone")))?;
     if let Some(why) = crate::maintenance::unreachable_store(&instance) {
         return Err(Failure::new(ReasonCode::InvalidSpec, why));
@@ -239,7 +239,11 @@ async fn run(
             None => status.last_run.is_none() && status.last_skip_time.is_none(),
         };
     if let Some(next) = next.filter(|n| *n > pass.now) {
-        report.due_in = Some(pass.now.duration_until(next).as_secs().max(1) as u64);
+        report.due_in = Some(
+            u64::try_from(pass.now.duration_until(next).as_secs())
+                .unwrap_or(1)
+                .max(1),
+        );
     }
 
     // 3. May it run?
@@ -251,7 +255,7 @@ async fn run(
             .maintenances
             .in_namespace(&owner.namespace)
             .await
-            .map_err(|e| Failure::new(ReasonCode::KubernetesApiError, e))?;
+            .map_err(api_failure)?;
         let skipped = if spec.suspend {
             Some((ReasonCode::MaintenanceSuspended, "spec.suspend".to_string()))
         } else if let Some(up) = &instance_status.upgrade {
@@ -287,7 +291,7 @@ async fn run(
                 .repositories
                 .aiming_at(&instance_owner)
                 .await
-                .map_err(|e| Failure::new(ReasonCode::KubernetesApiError, e))?;
+                .map_err(api_failure)?;
             crate::maintenance::prune_lock(&instance, &aiming, pass.now)
                 .map(|why| (ReasonCode::MaintenanceSkipped, format!("prune lock: {why}")))
         } else {
@@ -323,7 +327,7 @@ async fn run(
                 message: None,
                 dry_run: spec.params.dry_run,
             });
-            status.run_count += 1;
+            status.run_count = status.run_count.saturating_add(1);
             if asked {
                 status.run_now = run_now;
             }
@@ -345,7 +349,7 @@ async fn run(
                 .ledger
                 .record(&owner.namespace, &owner.name, fields)
                 .await
-                .map_err(|e| Failure::new(ReasonCode::KubernetesApiError, e))?;
+                .map_err(api_failure)?;
             let image = crate::workload::image(&instance.spec, pass.default_image);
             let job = crate::maintenance::job(
                 &job_name,

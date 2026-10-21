@@ -2,6 +2,8 @@
 //! weebo-si `develop` b2fda552): what it prints is what the operator admits,
 //! its rules judged by Angos's engine.
 
+#![expect(clippy::unwrap_used, reason = "test helpers fail the test on purpose")]
+
 use adapters_outbound::CelInterpreterChecker;
 use api::local_instance::LocalInstance;
 use api::repository::Repository;

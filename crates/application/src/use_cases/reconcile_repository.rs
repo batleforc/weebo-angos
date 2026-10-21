@@ -12,7 +12,7 @@ use api::status::RenderState;
 use domain::error::ReasonCode;
 use domain::{Advisory, Failure};
 
-use super::{Outcome, instance_failure};
+use super::{Outcome, api_failure, instance_failure};
 use crate::ports::{AttachedInstances, BoundInstance, CelChecker};
 
 /// What a pass is about.
@@ -78,7 +78,7 @@ async fn run(
     let instance = instances
         .instance(bound)
         .await
-        .map_err(|e| Failure::new(ReasonCode::KubernetesApiError, e))?
+        .map_err(api_failure)?
         .ok_or_else(|| Failure::new(ReasonCode::InstanceNotFound, format!("{bound} is gone")))?;
     let kube = instance
         .spec
@@ -156,11 +156,7 @@ pub async fn release_repository(
     let Some(bound) = recorded else {
         return Ok(());
     };
-    let Some(instance) = instances
-        .instance(bound)
-        .await
-        .map_err(|e| Failure::new(ReasonCode::KubernetesApiError, e))?
-    else {
+    let Some(instance) = instances.instance(bound).await.map_err(api_failure)? else {
         return Ok(());
     };
     let status = instance.status.unwrap_or_default();
@@ -202,7 +198,10 @@ mod tests {
             Ok(BoundInstance::local(namespace, "reg"))
         }
 
-        async fn instance(&self, _: &BoundInstance) -> Result<Option<LocalInstance>, String> {
+        async fn instance(
+            &self,
+            _: &BoundInstance,
+        ) -> Result<Option<LocalInstance>, crate::ports::ApiError> {
             Ok(self.0.lock().unwrap().clone())
         }
     }

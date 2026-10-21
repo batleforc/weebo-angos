@@ -24,7 +24,7 @@ use weebo_kit_application::emit;
 use weebo_kit_application::ports::{SecretOwner, SecretStore};
 use weebo_kit_application::workload::OwnedObject;
 
-use super::{Outcome, instance_failure, workload_failure};
+use super::{Outcome, api_failure, instance_failure, workload_failure};
 use crate::ports::{
     AttachedInstances, Credentials, KeyGenerator, OwnedObjects, Owner, PasswordHasher,
 };
@@ -126,7 +126,7 @@ async fn run(
         .instances
         .instance(&bound)
         .await
-        .map_err(|e| Failure::new(ReasonCode::KubernetesApiError, e))?
+        .map_err(api_failure)?
         .ok_or_else(|| Failure::new(ReasonCode::InstanceNotFound, format!("{bound} is gone")))?;
 
     // The password, hashed, in the identity's own Secret.
@@ -154,7 +154,8 @@ async fn run(
     let rotated_at: Option<Timestamp> = read(keys::ROTATED_AT).await?.and_then(|t| t.parse().ok());
     let due = pass.spec.rotation_days.is_some_and(|days| {
         rotated_at.is_some_and(|at| {
-            pass.now.duration_since(at) >= SignedDuration::from_hours(24 * i64::from(days))
+            pass.now.duration_since(at)
+                >= SignedDuration::from_hours(i64::from(days).saturating_mul(24))
         })
     });
     let rotate =
@@ -170,7 +171,7 @@ async fn run(
                 .to_string(),
             _ => ports.keys.password(),
         };
-        let version = version + 1;
+        let version = version.saturating_add(1);
         let mut labels = BTreeMap::from([
             (
                 "app.kubernetes.io/managed-by".to_string(),

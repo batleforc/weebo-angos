@@ -32,3 +32,6 @@ tracing-subscriber = { workspace = true }
 application = { workspace = true, features = ["test-support"] }
 k8s-openapi = { workspace = true }
 serde_json = { workspace = true }
+
+[lints]
+workspace = true

@@ -287,8 +287,9 @@ pub struct Global {
     #[schemars(range(min = 1))]
     pub max_concurrent_requests: Option<u64>,
     /// `shutdown_drain_secs`: how long a stopping pod drains. Startup
-    /// only. Angos: 30; the pods' grace period follows it.
+    /// only. Angos: 30; the pods' grace period follows it. At most an hour.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(max = 3600))]
     pub shutdown_drain_secs: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jobs: Option<Jobs>,
@@ -805,9 +806,9 @@ pub struct Reload {
     #[serde(default)]
     pub mode: ReloadMode,
     /// How long to wait for every pod's answer (the kubelet takes up to
-    /// 90 s to update a mounted Secret).
+    /// 90 s to update a mounted Secret). At most a day.
     #[serde(default = "reload_timeout")]
-    #[schemars(range(min = 30))]
+    #[schemars(range(min = 30, max = 86400))]
     pub timeout_seconds: u64,
     /// When no answer came in time: `Wait` (keep reading the logs) or
     /// `Rollout` (roll the pods, which read the file at start).

@@ -18,7 +18,7 @@
 //! Prometheus exporter adds.
 
 use std::collections::BTreeMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock, PoisonError};
 
 use api::maintenance::{MaintenanceStatus, RunState, Task};
 use api::status::InstanceStatus;
@@ -62,7 +62,11 @@ fn counters() -> &'static Counters {
             .u64_observable_gauge("weebo_angos_instance_ready")
             .with_description("1 when the AngosLocalInstance is Ready")
             .with_callback(|observer| {
-                for ((namespace, name), ready) in ready().lock().expect("metrics lock").iter() {
+                for ((namespace, name), ready) in ready()
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .iter()
+                {
                     observer.observe(u64::from(*ready), &labels(namespace, name));
                 }
             })
@@ -141,7 +145,7 @@ pub fn record_instance(
     let counters = counters();
     ready()
         .lock()
-        .expect("metrics lock")
+        .unwrap_or_else(PoisonError::into_inner)
         .insert((namespace.to_string(), name.to_string()), is_ready);
     let changes = instance_changes(previous, now);
     for result in changes.reloads {
@@ -162,7 +166,7 @@ pub fn record_instance(
 pub fn forget_instance(namespace: &str, name: &str) {
     ready()
         .lock()
-        .expect("metrics lock")
+        .unwrap_or_else(PoisonError::into_inner)
         .remove(&(namespace.to_string(), name.to_string()));
 }
 

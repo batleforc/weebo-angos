@@ -905,8 +905,9 @@
           "type": "object"
         },
         "shutdownDrainSecs": {
-          "description": "`shutdown_drain_secs`: how long a stopping pod drains. Startup\nonly. Angos: 30; the pods' grace period follows it.",
+          "description": "`shutdown_drain_secs`: how long a stopping pod drains. Startup\nonly. Angos: 30; the pods' grace period follows it. At most an hour.",
           "format": "uint64",
+          "maximum": 3600,
           "minimum": 0,
           "nullable": true,
           "type": "integer"
@@ -1056,8 +1057,9 @@
         },
         "timeoutSeconds": {
           "default": 180,
-          "description": "How long to wait for every pod's answer (the kubelet takes up to\n90 s to update a mounted Secret).",
+          "description": "How long to wait for every pod's answer (the kubelet takes up to\n90 s to update a mounted Secret). At most a day.",
           "format": "uint64",
+          "maximum": 86400,
           "minimum": 30,
           "type": "integer"
         }

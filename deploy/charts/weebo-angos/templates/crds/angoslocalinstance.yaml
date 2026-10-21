@@ -798,8 +798,9 @@ spec:
                   shutdownDrainSecs:
                     description: |-
                       `shutdown_drain_secs`: how long a stopping pod drains. Startup
-                      only. Angos: 30; the pods' grace period follows it.
+                      only. Angos: 30; the pods' grace period follows it. At most an hour.
                     format: uint64
+                    maximum: 3600.0
                     minimum: 0.0
                     nullable: true
                     type: integer
@@ -931,8 +932,9 @@ spec:
                     default: 180
                     description: |-
                       How long to wait for every pod's answer (the kubelet takes up to
-                      90 s to update a mounted Secret).
+                      90 s to update a mounted Secret). At most a day.
                     format: uint64
+                    maximum: 86400.0
                     minimum: 30.0
                     type: integer
                 type: object

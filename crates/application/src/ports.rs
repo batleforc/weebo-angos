@@ -62,6 +62,32 @@ impl CredentialError {
     }
 }
 
+/// A Kubernetes API call of a port that failed: what was asked, and why.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ApiError {
+    /// The API server refused the operator (401/403): its RBAC, which a
+    /// retry doesn't fix.
+    #[error("permission denied: {0}")]
+    Denied(String),
+    /// What the call was built from doesn't read (an invalid label
+    /// selector of the spec).
+    #[error("{0}")]
+    Invalid(String),
+    /// Unreachable, overloaded, timing out, or another refusal: usually
+    /// transient.
+    #[error("Kubernetes API error: {0}")]
+    Failed(String),
+}
+
+impl ApiError {
+    pub fn reason(&self) -> ReasonCode {
+        match self {
+            ApiError::Denied(_) | ApiError::Failed(_) => ReasonCode::KubernetesApiError,
+            ApiError::Invalid(_) => ReasonCode::InvalidSpec,
+        }
+    }
+}
+
 /// The Secrets an instance's spec references, read only when they carry
 /// the credential label (spec 2.8).
 #[async_trait::async_trait]
@@ -85,7 +111,7 @@ pub trait Credentials: Send + Sync {
 /// discovery), for `auth.kubernetes` without an explicit issuer.
 #[async_trait::async_trait]
 pub trait ClusterIssuer: Send + Sync {
-    async fn issuer(&self) -> Result<String, String>;
+    async fn issuer(&self) -> Result<String, ApiError>;
 }
 
 /// Fresh secrets the operator generates.
@@ -109,7 +135,7 @@ pub trait IdentityDirectory: Send + Sync {
         &self,
         instance: &Owner,
         selector: &api::local_instance::RepositorySelector,
-    ) -> Result<Vec<crate::identities::IdentityView>, String>;
+    ) -> Result<Vec<crate::identities::IdentityView>, ApiError>;
 }
 
 /// Where a reconcile records status fields right after the write they
@@ -122,7 +148,7 @@ pub trait StatusLedger: Send + Sync {
         namespace: &str,
         name: &str,
         fields: serde_json::Map<String, serde_json::Value>,
-    ) -> Result<(), String>;
+    ) -> Result<(), ApiError>;
 }
 
 /// What a CEL rule is evaluated against (spec 2.6): an access policy
@@ -158,7 +184,7 @@ pub trait RepositoryDirectory: Send + Sync {
     /// bound to it, or not bound yet and naming it (or, without
     /// `instanceRef`, in its namespace) — `namespace/name`. What a prune
     /// must not run without (spec 6.6).
-    async fn aiming_at(&self, instance: &Owner) -> Result<Vec<String>, String> {
+    async fn aiming_at(&self, instance: &Owner) -> Result<Vec<String>, ApiError> {
         let _ = instance;
         Ok(Vec::new())
     }
@@ -169,7 +195,7 @@ pub trait RepositoryDirectory: Send + Sync {
         &self,
         instance: &Owner,
         selector: &api::local_instance::RepositorySelector,
-    ) -> Result<Vec<crate::repositories::RepositoryView>, String>;
+    ) -> Result<Vec<crate::repositories::RepositoryView>, ApiError>;
 }
 
 /// The instances a repository may bind to: resolution through the
@@ -183,7 +209,8 @@ pub trait AttachedInstances: Send + Sync {
         instance_ref: Option<&weebo_kit_api::InstanceRef>,
         recorded: Option<&BoundInstance>,
     ) -> Result<BoundInstance, InstanceError>;
-    async fn instance(&self, bound: &BoundInstance) -> Result<Option<api::LocalInstance>, String>;
+    async fn instance(&self, bound: &BoundInstance)
+    -> Result<Option<api::LocalInstance>, ApiError>;
 }
 
 /// Where a maintenance's `Job` stands.
@@ -203,11 +230,11 @@ pub struct JobState {
 /// The maintenances' `Job`s.
 #[async_trait::async_trait]
 pub trait Jobs: Send + Sync {
-    async fn job(&self, namespace: &str, name: &str) -> Result<Option<JobState>, String>;
+    async fn job(&self, namespace: &str, name: &str) -> Result<Option<JobState>, ApiError>;
 }
 
 /// The maintenances of a namespace (the write lock looks at the others).
 #[async_trait::async_trait]
 pub trait MaintenanceDirectory: Send + Sync {
-    async fn in_namespace(&self, namespace: &str) -> Result<Vec<api::Maintenance>, String>;
+    async fn in_namespace(&self, namespace: &str) -> Result<Vec<api::Maintenance>, ApiError>;
 }

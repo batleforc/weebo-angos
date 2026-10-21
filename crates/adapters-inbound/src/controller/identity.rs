@@ -113,6 +113,10 @@ async fn apply(api: &Api<Identity>, identity: &Identity, ctx: &Ctx) -> Result<Ac
     )
     .await;
     super::record_reconcile(KIND, started, &report.outcome);
+    #[expect(
+        clippy::expect_used,
+        reason = "a status is a struct of serializable fields"
+    )]
     let mut fields = serde_json::to_value(&report.status)
         .expect("a status serializes")
         .as_object()

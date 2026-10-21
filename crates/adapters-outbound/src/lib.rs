@@ -11,12 +11,25 @@ pub mod instances;
 pub mod maintenance;
 pub mod repositories;
 
+use application::ports::ApiError;
 pub use cel::CelInterpreterChecker;
 pub use cluster::{Argon2Hasher, KubeClusterIssuer, KubeCredentials, RandomKeys};
 pub use instances::LocalInstanceDirectory;
 pub use maintenance::{KubeJobs, KubeMaintenances};
 pub use repositories::KubeRepositories;
 use weebo_kit_adapters::WorkloadSettings;
+
+/// A failed Kubernetes call as the ports' [`ApiError`]: `what` was being
+/// done, a 401/403 (the operator's RBAC) kept apart from the rest.
+pub fn api_error(what: impl std::fmt::Display) -> impl FnOnce(kube::Error) -> ApiError {
+    move |e| {
+        let message = format!("{what}: {e}");
+        match &e {
+            kube::Error::Api(s) if s.code == 401 || s.code == 403 => ApiError::Denied(message),
+            _ => ApiError::Failed(message),
+        }
+    }
+}
 
 /// The field manager of every apply and status patch.
 pub const FIELD_MANAGER: &str = "weebo-angos-operator";

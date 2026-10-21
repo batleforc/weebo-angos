@@ -191,8 +191,8 @@ pub fn grant(verb: Verb, subjects: &[Subject], kube: &str) -> Option<String> {
     }
     let who = if subjects.contains(&Subject::Anonymous) {
         "true".to_string()
-    } else if subjects.len() == 1 {
-        subjects[0].cel(kube)
+    } else if let [only] = subjects {
+        only.cel(kube)
     } else {
         subjects
             .iter()

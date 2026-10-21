@@ -3,7 +3,7 @@
 //! `angos.weebo.io/credential: "true"`, spec 2.8), the cluster's
 //! ServiceAccount issuer, and fresh keys.
 
-use application::ports::{ClusterIssuer, CredentialError, Credentials, KeyGenerator};
+use application::ports::{ApiError, ClusterIssuer, CredentialError, Credentials, KeyGenerator};
 use base64::Engine;
 use k8s_openapi::api::core::v1::Secret;
 use kube::api::Api;
@@ -50,12 +50,19 @@ impl Credentials for KubeCredentials {
                 ),
             ));
         }
-        Ok(secret
+        // A key that isn't UTF-8 is said so, not dropped (it would read as
+        // missing).
+        secret
             .data
             .unwrap_or_default()
             .into_iter()
-            .filter_map(|(k, v)| Some((k, String::from_utf8(v.0).ok()?)))
-            .collect())
+            .map(|(k, v)| match String::from_utf8(v.0) {
+                Ok(v) => Ok((k, v)),
+                Err(_) => Err(CredentialError::Missing(format!(
+                    "secret {namespace}/{name}: key {k:?} is not UTF-8"
+                ))),
+            })
+            .collect()
     }
 
     async fn read(
@@ -127,21 +134,24 @@ impl KubeClusterIssuer {
 
 #[async_trait::async_trait]
 impl ClusterIssuer for KubeClusterIssuer {
-    async fn issuer(&self) -> Result<String, String> {
+    async fn issuer(&self) -> Result<String, ApiError> {
         self.issuer
             .get_or_try_init(|| async {
                 let request = http::Request::get("/.well-known/openid-configuration")
                     .body(Vec::new())
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| ApiError::Failed(e.to_string()))?;
                 let discovery: serde_json::Value = self
                     .client
                     .request(request)
                     .await
-                    .map_err(|e| format!("the API server's OIDC discovery: {e}"))?;
-                discovery["issuer"]
-                    .as_str()
+                    .map_err(crate::api_error("the API server's OIDC discovery"))?;
+                discovery
+                    .get("issuer")
+                    .and_then(serde_json::Value::as_str)
                     .map(String::from)
-                    .ok_or_else(|| "the API server's OIDC discovery has no issuer".to_string())
+                    .ok_or_else(|| {
+                        ApiError::Failed("the API server's OIDC discovery has no issuer".into())
+                    })
             })
             .await
             .cloned()
@@ -152,12 +162,20 @@ impl ClusterIssuer for KubeClusterIssuer {
 pub struct RandomKeys;
 
 impl KeyGenerator for RandomKeys {
+    #[expect(
+        clippy::expect_used,
+        reason = "getrandom fails only without an OS entropy source: no key beats a weak one"
+    )]
     fn token_key(&self) -> String {
         let mut key = [0u8; 32];
         getrandom::fill(&mut key).expect("the OS provides randomness");
         base64::engine::general_purpose::STANDARD.encode(key)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "getrandom fails only without an OS entropy source: no password beats a weak one"
+    )]
     fn password(&self) -> String {
         let mut bytes = [0u8; 32];
         getrandom::fill(&mut bytes).expect("the OS provides randomness");
@@ -170,6 +188,11 @@ impl KeyGenerator for RandomKeys {
 pub struct Argon2Hasher;
 
 impl application::ports::PasswordHasher for Argon2Hasher {
+    #[expect(
+        clippy::expect_used,
+        reason = "constant valid parameters; hashing then fails only on a password over 4 GiB, \
+                  beyond any Secret"
+    )]
     fn hash(&self, password: &str) -> String {
         use argon2::password_hash::{PasswordHasher as _, SaltString, rand_core::OsRng};
         let params = argon2::Params::new(19_456, 2, 1, None).expect("Angos's parameters are valid");

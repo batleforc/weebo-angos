@@ -8,8 +8,8 @@
 use api::config::GlobalAccess;
 use api::repository::{ImagePolicy, IndexDefault, RepositoryAccess};
 use domain::access::{
-    self, Subject, VERB_ADMIN, VERB_BROWSE, VERB_CATALOG, VERB_DELETE, VERB_JOBS, VERB_METRICS,
-    VERB_PULL, VERB_PUSH, Verb, grant,
+    self, VERB_ADMIN, VERB_BROWSE, VERB_CATALOG, VERB_DELETE, VERB_JOBS, VERB_METRICS, VERB_PULL,
+    VERB_PUSH, Verb, grant,
 };
 use domain::config::{IndexAction, Policy};
 
@@ -231,11 +231,6 @@ pub fn scan_policy(
         },
         checked.warnings,
     ))
-}
-
-/// Subjects are read here too, for the webhook's messages.
-pub fn parse_subject(subject: &str) -> Result<Subject, String> {
-    Subject::parse(subject).map_err(|e| e.0)
 }
 
 #[cfg(test)]

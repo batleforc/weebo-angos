@@ -122,6 +122,11 @@ pub fn cr_name(prefix: &str) -> String {
 }
 
 /// The chart's values as weebo-angos CRs.
+#[expect(
+    clippy::indexing_slicing,
+    reason = "serde_json::Value: reading a missing key gives Null, and the keys written are on \
+              objects built by json! here"
+)]
 pub fn import(values: &Value, options: &Options) -> anyhow::Result<Import> {
     let angos = &values["angos"];
     if !angos.is_object() {
@@ -378,8 +383,11 @@ pub fn import(values: &Value, options: &Options) -> anyhow::Result<Import> {
             }
             let args = strings(&job["args"]);
             let mut params = json!({"dryRun": task == "Prune" || args.iter().any(|a| a == "--dry-run" || a == "-d")});
-            if let Some(i) = args.iter().position(|a| a == "--concurrency")
-                && let Some(n) = args.get(i + 1).and_then(|n| n.parse::<u32>().ok())
+            if let Some(n) = args
+                .iter()
+                .skip_while(|a| *a != "--concurrency")
+                .nth(1)
+                .and_then(|n| n.parse::<u32>().ok())
             {
                 params["concurrency"] = n.into();
             }

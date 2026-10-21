@@ -95,7 +95,7 @@ fn client_tls(slot: &str, tls: Option<&api::config::ClientTls>) -> ClientTls {
 
 /// What the instance's Secrets hold and its rules compile to, resolved
 /// before rendering.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Clone, Default, PartialEq)]
 pub struct Resolved {
     /// `(access key id, secret key)` of the blob store, when S3.
     pub s3: Option<(String, String)>,
@@ -133,15 +133,24 @@ pub struct Resolved {
     pub webhook_auth: BTreeMap<String, WebhookAuth>,
 }
 
+domain::redacted_debug!(Resolved {
+    oidc, ui_client_id, cluster_issuer, global_rules, admin_rule, retention, index,
+    repositories, scan, webhook_auth,
+} secrets {
+    s3, metadata_s3, redis_url, token_key, identities, scan_token, event_tokens,
+});
+
 /// How an authorization webhook is called.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Clone, Default, PartialEq)]
 pub struct WebhookAuth {
     pub bearer_token: Option<String>,
     pub basic: Option<(String, String)>,
 }
 
+domain::redacted_debug!(WebhookAuth {} secrets { bearer_token, basic });
+
 /// The two files of an instance and what tells them apart.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Rendered {
     pub layers: Layers,
     pub boot_file: String,
@@ -156,6 +165,12 @@ pub struct Rendered {
     pub extra_config_used: bool,
 }
 
+domain::redacted_debug!(Rendered {
+    layers, boot_hash, hot_hash, extra_config_used,
+} secrets {
+    boot_file, hot_file,
+});
+
 /// Why an instance can't be rendered: each problem names the spec field
 /// or the Angos key.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,7 +181,7 @@ impl std::fmt::Display for RenderError {
         let shown: Vec<&str> = self.0.iter().take(5).map(String::as_str).collect();
         write!(f, "{}", shown.join("; "))?;
         if self.0.len() > 5 {
-            write!(f, " and {} more", self.0.len() - 5)?;
+            write!(f, " and {} more", self.0.len().saturating_sub(5))?;
         }
         Ok(())
     }
@@ -546,6 +561,10 @@ fn lookup<'a>(table: &'a toml::Table, path: &[&str]) -> Option<&'a toml::Value> 
 /// `extraConfig` as a TOML table, refused where it would override what the
 /// operator renders, a startup key, or anything of the startup layer.
 fn extra(spec: &LocalInstanceSpec, rendered: &toml::Table) -> Result<toml::Table, Vec<String>> {
+    #[expect(
+        clippy::expect_used,
+        reason = "a map of serde_json::Value always serializes to JSON"
+    )]
     let value = serde_json::to_value(&spec.extra_config).expect("a JSON map serializes");
     let table: toml::Table = toml::Table::try_from(value)
         .map_err(|e| vec![format!("spec.extraConfig is not TOML: {e}")])?;
@@ -561,11 +580,11 @@ fn extra(spec: &LocalInstanceSpec, rendered: &toml::Table) -> Result<toml::Table
             problems.push(format!(
                 "spec.extraConfig.{path}: a startup key, set through the typed fields"
             ));
-        } else if keys
-            .iter()
-            .enumerate()
-            .any(|(i, _)| lookup(rendered, &keys[..=i]).is_some_and(|v| !v.is_table()))
-        {
+        } else if keys.iter().enumerate().any(|(i, _)| {
+            keys.get(..=i)
+                .and_then(|prefix| lookup(rendered, prefix))
+                .is_some_and(|v| !v.is_table())
+        }) {
             problems.push(format!(
                 "spec.extraConfig.{path}: rendered from a typed field of the spec, set it there"
             ));

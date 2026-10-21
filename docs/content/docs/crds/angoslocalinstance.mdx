@@ -346,7 +346,7 @@ spec:
 | [`pullHistory`](#spec.global.pullHistory) | `object` | no |  | `[global.pull_history]`. |
 | [`redirects`](#spec.global.redirects) | `object` | no |  | Blob and manifest downloads redirected to presigned S3 URLs. **Off by default** (Angos: on): the clients must then reach the bucket themselves. |
 | [`retention`](#spec.global.retention) | `object` | no |  | `retention_policy`: CEL rules on `image` (OR with the repositories'). |
-| `shutdownDrainSecs` | `integer` | no |  | `shutdown_drain_secs`: how long a stopping pod drains. Startup only. Angos: 30; the pods' grace period follows it.<br /><br />Constraints: `minimum: 0` |
+| `shutdownDrainSecs` | `integer` | no |  | `shutdown_drain_secs`: how long a stopping pod drains. Startup only. Angos: 30; the pods' grace period follows it. At most an hour.<br /><br />Constraints: `minimum: 0`, `maximum: 3600` |
 | `updatePullTime` | `boolean` | no |  | `update_pull_time`: record when an image is pulled (needed by any rule on `last_pulled_at` or `top_pulled`). Angos: false. |
 
 ### `spec.global.access` [#spec.global.access]
@@ -448,7 +448,7 @@ spec:
 | --- | --- | --- | --- | --- |
 | `mode` | `string` | no | `"Hot"` | `Hot`: Angos reloads the file in place, the operator reads in each pod's log that it did. `Rollout`: every change also rolls the pods.<br /><br />Values: `"Hot"`, `"Rollout"` |
 | `onUnconfirmed` | `string` | no | `"Wait"` | When no answer came in time: `Wait` (keep reading the logs) or `Rollout` (roll the pods, which read the file at start).<br /><br />Values: `"Wait"`, `"Rollout"` |
-| `timeoutSeconds` | `integer` | no | `180` | How long to wait for every pod's answer (the kubelet takes up to 90 s to update a mounted Secret).<br /><br />Constraints: `minimum: 30` |
+| `timeoutSeconds` | `integer` | no | `180` | How long to wait for every pod's answer (the kubelet takes up to 90 s to update a mounted Secret). At most a day.<br /><br />Constraints: `minimum: 30`, `maximum: 86400` |
 
 ### `spec.repositorySelector` [#spec.repositorySelector]
 

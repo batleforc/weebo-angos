@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use api::Maintenance;
-use application::ports::{Owner, StatusLedger};
+use application::ports::{ApiError, Owner, StatusLedger};
 use application::use_cases::reconcile_maintenance::{
     MaintenancePass, MaintenancePorts, reconcile_maintenance,
 };
@@ -58,12 +58,14 @@ impl StatusLedger for Ledger {
         namespace: &str,
         name: &str,
         fields: serde_json::Map<String, serde_json::Value>,
-    ) -> Result<(), String> {
+    ) -> Result<(), ApiError> {
         let api: Api<Maintenance> = Api::namespaced(self.client.clone(), namespace);
         weebo_kit_runtime::status::record(&api, super::FIELD_MANAGER, name, &fields)
             .await
             .map(|_| ())
-            .map_err(|e| e.to_string())
+            .map_err(super::api_error(format_args!(
+                "recording the status of {namespace}/{name}"
+            )))
     }
 }
 
@@ -106,6 +108,10 @@ async fn reconcile(obj: Arc<Maintenance>, ctx: Arc<Ctx>) -> Result<Action, Error
     .await;
     super::record_reconcile(KIND, started, &report.outcome);
     super::metrics::record_maintenance(obj.spec.task, &previous, &report.status);
+    #[expect(
+        clippy::expect_used,
+        reason = "a status is a struct of serializable fields"
+    )]
     let mut fields = serde_json::to_value(&report.status)
         .expect("a status serializes")
         .as_object()

@@ -4,6 +4,12 @@
 //! change rewritten in place, a startup change under a new Secret, an
 //! object never taken over, a Secret that doesn't opt in, the finalizer.
 
+#![expect(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    reason = "test helpers fail the test on purpose"
+)]
+
 use std::time::Duration;
 
 use adapters_inbound::controller;
@@ -50,7 +56,11 @@ async fn reason_is(api: &Api<LocalInstance>, name: &str, reason: &str) {
 
 #[tokio::test]
 async fn an_instance_is_deployed_from_its_two_layers() {
-    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+    // Another test of this binary may have installed one first.
+    tracing_subscriber::fmt()
+        .with_test_writer()
+        .try_init()
+        .unwrap_or_default();
     let cluster = testkit::envtest::start().await;
     let client = cluster.client();
     Api::<Namespace>::all(client.clone())
