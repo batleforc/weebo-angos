@@ -22,7 +22,10 @@ impl AttachedInstances for Instances {
         Ok(BoundInstance::local(namespace, "reg"))
     }
 
-    async fn instance(&self, _: &BoundInstance) -> Result<Option<LocalInstance>, String> {
+    async fn instance(
+        &self,
+        _: &BoundInstance,
+    ) -> Result<Option<LocalInstance>, crate::ports::ApiError> {
         Ok(Some(self.0.lock().unwrap().clone()))
     }
 }

@@ -59,7 +59,7 @@ kubectl get events -A --field-selector reason=InvalidSpec
 | `UpgradeFailed` | blocking | `Ready: False`, Event (`Warning`) | A step of the upgrade failed (`status.upgrade.failure`): the pods stay on the old version. A new value of `angos.weebo.io/retry-upgrade` runs it again. |
 | `UpgradeUnchecked` | advisory | condition `UpgradeUnchecked: True`, Event (`Normal`) | The upgrade's scrub can't run (an FS store on an `emptyDir`): the pods rolled without it. |
 | `LeavesWatchScope` | blocking | `Ready: False`, Event (`Warning`) | An update would take a CR still carrying the finalizer out of the operator's label selector (`watch.labelSelector`): refused at admission. |
-| `KubernetesApiError` | blocking | `Ready: False`, Event (`Warning`), admission denial | A Kubernetes API call of the operator itself failed (reading a CR or a Secret, applying an object, patching a status) — retried. |
+| `KubernetesApiError` | blocking | `Ready: False`, Event (`Warning`) | A Kubernetes API call of the operator itself failed (reading a CR or a Secret, applying an object, patching a status) — retried. |
 | `ExtraConfigUsed` | advisory | condition `ExtraConfigUsed: True`, Event (`Normal`) | `extraConfig` is rendered: what it sets isn't checked by the operator, only by Angos at load. |
 | `RuleMayFail` | advisory | condition `RuleMayFail: True`, Event (`Normal`) | A CEL rule failed to evaluate on a plausible request: in an access policy, an error is a denial. |
 | `IndexMemoryRisk` | advisory | condition `IndexMemoryRisk: True`, Event (`Normal`) | The index jobs may outgrow the container's memory limit (`global.jobs.index × global.limits.maxIndexEntries`). |

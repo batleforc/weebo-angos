@@ -6,7 +6,7 @@
 
 use api::LocalInstance;
 use api::local_instance::object_sharing;
-use application::ports::{BoundInstance, InstanceDirectory, InstanceError};
+use application::ports::{ApiError, BoundInstance, InstanceDirectory, InstanceError};
 use kube::Client;
 use kube::core::Selector;
 use kube::runtime::reflector::Store;
@@ -44,8 +44,11 @@ impl LocalInstanceDirectory {
 
     /// The instance `bound` designates, `None` when it is gone (or out of
     /// scope).
-    pub async fn get(&self, bound: &BoundInstance) -> Result<Option<LocalInstance>, String> {
-        self.instances.get(bound).await.map_err(|e| e.to_string())
+    pub async fn get(&self, bound: &BoundInstance) -> Result<Option<LocalInstance>, ApiError> {
+        self.instances
+            .get(bound)
+            .await
+            .map_err(|e| crate::api_error(e.what)(*e.source))
     }
 
     /// Resolves a repository or an identity of `namespace`: an instance of
@@ -89,7 +92,7 @@ impl application::ports::AttachedInstances for LocalInstanceDirectory {
         LocalInstanceDirectory::resolve_attached(self, namespace, instance_ref, recorded).await
     }
 
-    async fn instance(&self, bound: &BoundInstance) -> Result<Option<LocalInstance>, String> {
+    async fn instance(&self, bound: &BoundInstance) -> Result<Option<LocalInstance>, ApiError> {
         self.get(bound).await
     }
 }

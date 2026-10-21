@@ -39,9 +39,18 @@ impl Version {
     }
 }
 
+/// Why an upgrade isn't allowed, and how to allow it anyway.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
+pub struct UpgradeRefused(pub String);
+
 /// Why the instance may not run `to` while it runs `current` (`None`: a
 /// new instance), unless `approved` names `to`.
-pub fn check(current: Option<&str>, to: &str, approved: Option<&str>) -> Result<(), String> {
+pub fn check(
+    current: Option<&str>,
+    to: &str,
+    approved: Option<&str>,
+) -> Result<(), UpgradeRefused> {
     if approved == Some(to) {
         return Ok(());
     }
@@ -50,10 +59,10 @@ pub fn check(current: Option<&str>, to: &str, approved: Option<&str>) -> Result<
         api::annotations::APPROVED_UPGRADE
     );
     if !api::angos::SUPPORTED_VERSIONS.contains(&to) {
-        return Err(format!(
+        return Err(UpgradeRefused(format!(
             "Angos {to} isn't a version the operator is tested with ({}): {lift}",
             api::angos::SUPPORTED_VERSIONS.join(", ")
-        ));
+        )));
     }
     let (Some(current), Some(target)) = (current, Version::parse(to)) else {
         return Ok(());
@@ -62,15 +71,15 @@ pub fn check(current: Option<&str>, to: &str, approved: Option<&str>) -> Result<
         return Ok(());
     };
     if target < running {
-        return Err(format!(
+        return Err(UpgradeRefused(format!(
             "Angos {to} is older than the {current} the instance runs: its store may hold what \
              {to} doesn't read; {lift}"
-        ));
+        )));
     }
     if target.major != running.major || target.minor > running.minor + 1 {
-        return Err(format!(
+        return Err(UpgradeRefused(format!(
             "Angos {current} → {to} skips a minor version: upgrade one minor at a time, or {lift}"
-        ));
+        )));
     }
     Ok(())
 }
@@ -228,12 +237,13 @@ mod tests {
             (Some("1.12.3"), "1.12.2"),
         ] {
             let refused = check(current, to, None).unwrap_err();
-            assert!(refused.contains("approved-upgrade"), "{refused}");
+            assert!(refused.0.contains("approved-upgrade"), "{refused}");
             assert_eq!(check(current, to, Some(to)), Ok(()));
         }
         assert!(
             check(Some("1.10.0"), "1.12.3", None)
                 .unwrap_err()
+                .0
                 .contains("skips a minor")
         );
     }

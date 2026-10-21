@@ -3,7 +3,7 @@
 //! maintenances of a namespace.
 
 use api::Maintenance;
-use application::ports::{JobState, Jobs, MaintenanceDirectory};
+use application::ports::{ApiError, JobState, Jobs, MaintenanceDirectory};
 use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::Pod;
 use kube::api::{Api, ListParams};
@@ -23,12 +23,12 @@ impl KubeJobs {
 
 #[async_trait::async_trait]
 impl Jobs for KubeJobs {
-    async fn job(&self, namespace: &str, name: &str) -> Result<Option<JobState>, String> {
+    async fn job(&self, namespace: &str, name: &str) -> Result<Option<JobState>, ApiError> {
         let jobs: Api<Job> = Api::namespaced(self.client.clone(), namespace);
         let Some(job) = jobs
             .get_opt(name)
             .await
-            .map_err(|e| format!("Job {namespace}/{name}: {e}"))?
+            .map_err(crate::api_error(format_args!("Job {namespace}/{name}")))?
         else {
             return Ok(None);
         };
@@ -45,7 +45,9 @@ impl Jobs for KubeJobs {
         let pod = pods
             .list(&ListParams::default().labels(&format!("job-name={name}")))
             .await
-            .map_err(|e| format!("pods of Job {namespace}/{name}: {e}"))?
+            .map_err(crate::api_error(format_args!(
+                "pods of Job {namespace}/{name}"
+            )))?
             .items
             .into_iter()
             .next();
@@ -99,7 +101,7 @@ impl KubeMaintenances {
 
 #[async_trait::async_trait]
 impl MaintenanceDirectory for KubeMaintenances {
-    async fn in_namespace(&self, namespace: &str) -> Result<Vec<Maintenance>, String> {
+    async fn in_namespace(&self, namespace: &str) -> Result<Vec<Maintenance>, ApiError> {
         if let Some(shared) = self.watches.get::<Maintenance>() {
             let store = shared.store();
             // An unsynced store is never read as empty.
@@ -118,6 +120,8 @@ impl MaintenanceDirectory for KubeMaintenances {
             .list(&ListParams::default())
             .await
             .map(|l| l.items)
-            .map_err(|e| format!("listing AngosMaintenances in {namespace}: {e}"))
+            .map_err(crate::api_error(format_args!(
+                "listing AngosMaintenances in {namespace}"
+            )))
     }
 }

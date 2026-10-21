@@ -7,6 +7,11 @@ use k8s_openapi::jiff::civil::{Date, DateTime, Time};
 use k8s_openapi::jiff::tz::TimeZone;
 use k8s_openapi::jiff::{Timestamp, ToSpan};
 
+/// Why a schedule doesn't read.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
+pub struct ScheduleError(pub String);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Schedule {
     minutes: Vec<bool>,
@@ -67,7 +72,11 @@ fn field(text: &str, min: u32, max: u32, name: &str) -> Result<Vec<bool>, String
 }
 
 impl Schedule {
-    pub fn parse(text: &str) -> Result<Self, String> {
+    pub fn parse(text: &str) -> Result<Self, ScheduleError> {
+        Self::read(text).map_err(ScheduleError)
+    }
+
+    fn read(text: &str) -> Result<Self, String> {
         let fields: Vec<&str> = text.split_whitespace().collect();
         let [minute, hour, day, month, weekday] = fields[..] else {
             return Err(format!(
@@ -244,7 +253,7 @@ mod tests {
             ("a * * * *", "not a number"),
         ] {
             let err = Schedule::parse(text).unwrap_err();
-            assert!(err.contains(why), "{text}: {err}");
+            assert!(err.0.contains(why), "{text}: {err}");
         }
         assert_eq!(
             Schedule::parse("0 0 30 2 *")

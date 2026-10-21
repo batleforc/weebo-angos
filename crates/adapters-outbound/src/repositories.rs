@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use api::local_instance::RepositorySelector;
 use api::{Identity, Repository};
 use application::identities::IdentityView;
-use application::ports::{IdentityDirectory, Owner, RepositoryDirectory};
+use application::ports::{ApiError, IdentityDirectory, Owner, RepositoryDirectory};
 use application::repositories::RepositoryView;
 use k8s_openapi::api::core::v1::Namespace;
 use kube::api::{Api, ListParams};
@@ -68,7 +68,7 @@ impl KubeRepositories {
     /// shared watch once it has listed (an unsynced store is never read as
     /// empty; only the kept objects are cloned), from the API otherwise;
     /// sorted as the API server would.
-    async fn list<K: Bound>(&self, keep: impl Fn(&K) -> bool) -> Result<Vec<K>, String> {
+    async fn list<K: Bound>(&self, keep: impl Fn(&K) -> bool) -> Result<Vec<K>, ApiError> {
         if let Some(shared) = self.watches.get::<K>() {
             let store = shared.store();
             if weebo_kit_adapters::wait_synced(&store, STORE_READY_TIMEOUT).await {
@@ -93,7 +93,7 @@ impl KubeRepositories {
         api.list(&params)
             .await
             .map(|l| l.items.into_iter().filter(|o| keep(o)).collect())
-            .map_err(|e| format!("listing {}: {e}", K::kind(&())))
+            .map_err(crate::api_error(format_args!("listing {}", K::kind(&()))))
     }
 
     /// The operator's watch scope.
@@ -135,7 +135,7 @@ impl Bound for Identity {
 
 #[async_trait::async_trait]
 impl RepositoryDirectory for KubeRepositories {
-    async fn aiming_at(&self, instance: &Owner) -> Result<Vec<String>, String> {
+    async fn aiming_at(&self, instance: &Owner) -> Result<Vec<String>, ApiError> {
         let bound = BoundInstance::local(instance.namespace.clone(), instance.name.clone());
         let listed = self
             .list::<Repository>(|repo| {
@@ -171,7 +171,7 @@ impl RepositoryDirectory for KubeRepositories {
         &self,
         instance: &Owner,
         selector: &RepositorySelector,
-    ) -> Result<Vec<RepositoryView>, String> {
+    ) -> Result<Vec<RepositoryView>, ApiError> {
         Ok(self
             .bound::<Repository>(instance, selector)
             .await?
@@ -195,7 +195,7 @@ impl IdentityDirectory for KubeRepositories {
         &self,
         instance: &Owner,
         selector: &RepositorySelector,
-    ) -> Result<Vec<IdentityView>, String> {
+    ) -> Result<Vec<IdentityView>, ApiError> {
         Ok(self
             .bound::<Identity>(instance, selector)
             .await?
@@ -219,7 +219,7 @@ impl KubeRepositories {
         &self,
         instance: &Owner,
         selector: &RepositorySelector,
-    ) -> Result<Vec<K>, String> {
+    ) -> Result<Vec<K>, ApiError> {
         let bound = BoundInstance::local(instance.namespace.clone(), instance.name.clone());
         let listed = self.list::<K>(|o| o.bound() == Some(&bound)).await?;
         let own: Option<Selector> = selector
@@ -227,7 +227,7 @@ impl KubeRepositories {
             .clone()
             .map(Selector::try_from)
             .transpose()
-            .map_err(|e| format!("repositorySelector.selector: {e}"))?;
+            .map_err(|e| ApiError::Invalid(format!("repositorySelector.selector: {e}")))?;
         let shared = selector.namespaces.shared_with();
         let mut out = Vec::new();
         for repo in listed {
@@ -249,7 +249,7 @@ impl KubeRepositories {
     }
     /// The labels of `namespace` (`None`: it doesn't exist), from the
     /// cache while fresh.
-    async fn labels_of(&self, namespace: &str) -> Result<Labels, String> {
+    async fn labels_of(&self, namespace: &str) -> Result<Labels, ApiError> {
         let cache = || {
             self.namespace_labels
                 .lock()
@@ -263,7 +263,9 @@ impl KubeRepositories {
         let labels = Api::<Namespace>::all(self.client.clone())
             .get_opt(namespace)
             .await
-            .map_err(|e| format!("reading namespace {namespace}: {e}"))?
+            .map_err(crate::api_error(format_args!(
+                "reading namespace {namespace}"
+            )))?
             .map(|n| n.labels().clone());
         let mut cache = cache();
         if cache.len() >= NAMESPACE_LABELS_CAP {

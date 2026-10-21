@@ -87,7 +87,7 @@ impl Admission for AngosAdmission {
                 .and_then(|a| a.get(api::annotations::APPROVED_UPGRADE))
                 .map(String::as_str),
         )
-        .map_err(|m| Denial::new(ReasonCode::UpgradeNotAllowed, m))?;
+        .map_err(|m| Denial::new(ReasonCode::UpgradeNotAllowed, m.to_string()))?;
         for secret in referenced_secrets(&name, namespace, &instance.spec, &image) {
             match self.credentials.consents(namespace, &secret).await {
                 Ok(Some(false)) => {
@@ -148,7 +148,7 @@ impl AngosAdmission {
                 .attached
                 .instance(bound)
                 .await
-                .map_err(|e| Denial::new(ReasonCode::KubernetesApiError, e))?,
+                .map_err(|e| Denial::new(e.reason(), e.to_string()))?,
             None => None,
         };
         let kube = instance
@@ -176,7 +176,7 @@ impl AngosAdmission {
             .repositories
             .bound_to(&owner, &instance.spec.repository_selector)
             .await
-            .map_err(|e| Denial::new(ReasonCode::KubernetesApiError, e))?;
+            .map_err(|e| Denial::new(e.reason(), e.to_string()))?;
         let key = format!("{namespace}/{name}");
         let prefix = &repo.spec.prefix;
         if let Some(other) = bound_repos.iter().find(|r| {
@@ -221,7 +221,7 @@ mod tests {
         async fn instance(
             &self,
             _: &application::ports::BoundInstance,
-        ) -> Result<Option<LocalInstance>, String> {
+        ) -> Result<Option<LocalInstance>, application::ports::ApiError> {
             Ok(None)
         }
     }
@@ -370,7 +370,7 @@ mod tests {
         async fn instance(
             &self,
             _: &application::ports::BoundInstance,
-        ) -> Result<Option<LocalInstance>, String> {
+        ) -> Result<Option<LocalInstance>, application::ports::ApiError> {
             Ok(None)
         }
     }

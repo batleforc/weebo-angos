@@ -356,7 +356,7 @@ pub struct JobQueue {
 
 /// `[global.scan]` (`src/scan/mod.rs:43-75`): the scanner's endpoint and
 /// the global scan policy.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Scan {
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -371,6 +371,8 @@ pub struct Scan {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rules: Vec<String>,
 }
+
+crate::redacted_debug!(Scan { url, timeout_secs, tls, default, rules } secrets { token });
 
 /// `[ui]` (`src/configuration/ui.rs`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -403,12 +405,14 @@ pub enum Cache {
     Redis(Redis),
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Redis {
     pub url: String,
     /// Required by Angos.
     pub key_prefix: String,
 }
+
+crate::redacted_debug!(Redis { key_prefix } secrets { url });
 
 /// `blob_store` / `metadata_store`: `[*.fs]` or `[*.s3]`
 /// (`src/registry/blob_store/config.rs`).
@@ -430,7 +434,7 @@ pub struct FsStore {
 }
 
 /// `S3ConnectionConfig` + `TransportFields`, one flat table.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct S3Store {
     pub access_key_id: String,
     pub secret_key: String,
@@ -478,6 +482,16 @@ pub struct S3Store {
     pub presign_ttl_secs: Option<u64>,
 }
 
+crate::redacted_debug!(S3Store {
+    access_key_id, endpoint, bucket, region, key_prefix, multipart_copy_threshold,
+    multipart_copy_chunk_size, multipart_copy_jobs, multipart_part_size,
+    multipart_uniform_parts, operation_timeout_secs, operation_attempt_timeout_secs,
+    max_attempts, circuit_breaker_threshold, circuit_breaker_cooldown_secs,
+    children_scan_concurrency, presign_ttl_secs,
+} secrets {
+    secret_key,
+});
+
 /// `[auth]` (`src/auth/authenticator.rs:22-32`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Auth {
@@ -501,12 +515,14 @@ impl Auth {
 }
 
 /// `[auth.identity.<id>]`: a Basic identity.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Identity {
     pub username: String,
     /// An Argon2 PHC string.
     pub password: String,
 }
+
+crate::redacted_debug!(Identity { username } secrets { password });
 
 /// `[auth.oidc.<provider>]` (`src/auth/oidc/mod.rs:29-85`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -543,7 +559,7 @@ pub struct Oidc {
 }
 
 /// `[auth.webhook.<name>]` (`src/auth/webhook/config.rs`).
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct AuthWebhook {
     pub url: String,
     /// Required by Angos.
@@ -558,14 +574,22 @@ pub struct AuthWebhook {
     pub forward_headers: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+crate::redacted_debug!(AuthWebhook {
+    url, timeout_ms, basic_auth, tls, forward_headers,
+} secrets {
+    bearer_token,
+});
+
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct BasicAuth {
     pub username: String,
     pub password: String,
 }
 
+crate::redacted_debug!(BasicAuth { username } secrets { password });
+
 /// `[auth.token_service]` (`src/auth/token_service.rs:52-66`).
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct TokenService {
     /// Base64 (padded), ≥ 32 bytes decoded.
     pub secret_key: String,
@@ -577,6 +601,8 @@ pub struct TokenService {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttl_secs: Option<u64>,
 }
+
+crate::redacted_debug!(TokenService { realm, ttl_secs } secrets { secret_key });
 
 /// `[repository."<prefix>"]` (`src/registry/repository.rs:202-241`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -612,7 +638,7 @@ pub struct Repository {
 }
 
 /// `[[repository."<prefix>".upstream]]` (`crates/oci-client/src/lib.rs`).
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Upstream {
     pub url: String,
     /// Angos: 5.
@@ -632,6 +658,12 @@ pub struct Upstream {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
 }
+
+crate::redacted_debug!(Upstream {
+    url, max_redirect, connect_timeout_secs, read_timeout_secs, tls, username,
+} secrets {
+    password,
+});
 
 /// `[[repository."<prefix>".downstream]]` (`src/replication/config.rs`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -664,7 +696,7 @@ pub enum ReplicationMode {
 }
 
 /// `[event_webhook.<name>]` (`src/event_webhook/config.rs`).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct EventWebhook {
     pub url: String,
     pub policy: DeliveryPolicy,
@@ -684,6 +716,12 @@ pub struct EventWebhook {
     #[serde(flatten)]
     pub tls: ClientTls,
 }
+
+crate::redacted_debug!(EventWebhook {
+    url, policy, timeout_ms, max_retries, events, repository_filter, tls,
+} secrets {
+    token,
+});
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -1136,5 +1174,17 @@ pub(crate) mod tests {
     fn the_server_always_binds_every_address() {
         let table = AngosConfig::default().to_table();
         assert_eq!(table["server"]["bind_address"].as_str(), Some("0.0.0.0"));
+    }
+
+    #[test]
+    fn debug_never_prints_a_secret() {
+        let s3 = S3Store {
+            access_key_id: "id".into(),
+            secret_key: "hunter2".into(),
+            ..Default::default()
+        };
+        let printed = format!("{s3:?}");
+        assert!(printed.contains("\"id\""), "{printed}");
+        assert!(!printed.contains("hunter2"), "{printed}");
     }
 }

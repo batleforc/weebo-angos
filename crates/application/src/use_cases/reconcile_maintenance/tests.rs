@@ -23,7 +23,10 @@ impl AttachedInstances for Instances {
         Ok(BoundInstance::local(namespace, "reg"))
     }
 
-    async fn instance(&self, _: &BoundInstance) -> Result<Option<LocalInstance>, String> {
+    async fn instance(
+        &self,
+        _: &BoundInstance,
+    ) -> Result<Option<LocalInstance>, crate::ports::ApiError> {
         Ok(Some(self.0.lock().unwrap().clone()))
     }
 }
@@ -54,11 +57,11 @@ impl crate::ports::RepositoryDirectory for Aiming {
         &self,
         _: &Owner,
         _: &api::local_instance::RepositorySelector,
-    ) -> Result<Vec<crate::repositories::RepositoryView>, String> {
+    ) -> Result<Vec<crate::repositories::RepositoryView>, crate::ports::ApiError> {
         Ok(Vec::new())
     }
 
-    async fn aiming_at(&self, _: &Owner) -> Result<Vec<String>, String> {
+    async fn aiming_at(&self, _: &Owner) -> Result<Vec<String>, crate::ports::ApiError> {
         Ok(self.0.lock().unwrap().clone())
     }
 }

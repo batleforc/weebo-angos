@@ -95,7 +95,7 @@ fn client_tls(slot: &str, tls: Option<&api::config::ClientTls>) -> ClientTls {
 
 /// What the instance's Secrets hold and its rules compile to, resolved
 /// before rendering.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Clone, Default, PartialEq)]
 pub struct Resolved {
     /// `(access key id, secret key)` of the blob store, when S3.
     pub s3: Option<(String, String)>,
@@ -133,15 +133,24 @@ pub struct Resolved {
     pub webhook_auth: BTreeMap<String, WebhookAuth>,
 }
 
+domain::redacted_debug!(Resolved {
+    oidc, ui_client_id, cluster_issuer, global_rules, admin_rule, retention, index,
+    repositories, scan, webhook_auth,
+} secrets {
+    s3, metadata_s3, redis_url, token_key, identities, scan_token, event_tokens,
+});
+
 /// How an authorization webhook is called.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Clone, Default, PartialEq)]
 pub struct WebhookAuth {
     pub bearer_token: Option<String>,
     pub basic: Option<(String, String)>,
 }
 
+domain::redacted_debug!(WebhookAuth {} secrets { bearer_token, basic });
+
 /// The two files of an instance and what tells them apart.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Rendered {
     pub layers: Layers,
     pub boot_file: String,
@@ -155,6 +164,12 @@ pub struct Rendered {
     /// `extraConfig` was merged.
     pub extra_config_used: bool,
 }
+
+domain::redacted_debug!(Rendered {
+    layers, boot_hash, hot_hash, extra_config_used,
+} secrets {
+    boot_file, hot_file,
+});
 
 /// Why an instance can't be rendered: each problem names the spec field
 /// or the Angos key.

@@ -10,7 +10,9 @@ pub mod reconcile_repository;
 use domain::error::ReasonCode;
 use domain::{Advisory, Failure};
 
-use crate::ports::{BoundInstance, InstanceError, WorkloadError, instance_reason, workload_reason};
+use crate::ports::{
+    ApiError, BoundInstance, InstanceError, WorkloadError, instance_reason, workload_reason,
+};
 
 /// An instance that couldn't be resolved, as a failure (`Failure` and
 /// `InstanceError` both being the kit's, no `From` between them).
@@ -21,6 +23,11 @@ pub fn instance_failure(err: InstanceError) -> Failure {
 /// Owned objects that couldn't be written or read, as a failure.
 pub fn workload_failure(err: WorkloadError) -> Failure {
     Failure::new(workload_reason(&err), err.to_string())
+}
+
+/// A port's Kubernetes API call that failed, as a failure.
+pub fn api_failure(err: ApiError) -> Failure {
+    Failure::new(err.reason(), err.to_string())
 }
 
 /// What a reconcile ended on.

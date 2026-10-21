@@ -36,7 +36,7 @@ use k8s_openapi::jiff::{SignedDuration, Timestamp};
 use weebo_kit_api::annotations as weebo_kit_api_annotations;
 use weebo_kit_application::workload::{LogQuery, Owner};
 
-use super::{Outcome, workload_failure};
+use super::{Outcome, api_failure, workload_failure};
 use crate::ports::{
     ClusterIssuer, CredentialError, Credentials, KeyGenerator, OwnedObjects, PodLogs, StatusLedger,
 };
@@ -213,7 +213,7 @@ async fn resolve(
     {
         resolved.cluster_issuer = Some(ports.issuer.issuer().await.map_err(|e| {
             Failure::new(
-                ReasonCode::KubernetesApiError,
+                e.reason(),
                 format!(
                     "the cluster's ServiceAccount issuer couldn't be read ({e}): set \
                      spec.auth.kubernetes.issuer"
@@ -368,7 +368,7 @@ async fn policies(
         .repositories
         .bound_to(pass.owner, &spec.repository_selector)
         .await
-        .map_err(|e| Failure::new(ReasonCode::KubernetesApiError, e))?;
+        .map_err(api_failure)?;
     let in_service: std::collections::BTreeSet<String> = status
         .repositories
         .iter()
@@ -452,7 +452,7 @@ async fn identities(
         .identities
         .bound_to(pass.owner, &spec.repository_selector)
         .await
-        .map_err(|e| Failure::new(ReasonCode::KubernetesApiError, e))?;
+        .map_err(api_failure)?;
     let in_service: std::collections::BTreeSet<String> = status
         .identities
         .iter()
@@ -887,7 +887,7 @@ async fn run(
             .get(annotations::APPROVED_UPGRADE)
             .map(String::as_str),
     )
-    .map_err(|m| Failure::new(ReasonCode::UpgradeNotAllowed, m))?;
+    .map_err(|m| Failure::new(ReasonCode::UpgradeNotAllowed, m.to_string()))?;
     let running_image = running
         .as_ref()
         .and_then(|r| r.annotation(workload::IMAGE_ANNOTATION))
@@ -1062,7 +1062,7 @@ async fn run(
             .ledger
             .record(&owner.namespace, &owner.name, fields)
             .await
-            .map_err(|e| Failure::new(ReasonCode::KubernetesApiError, e))?;
+            .map_err(api_failure)?;
     }
     for (api_version, kind, name) in workload::removed(&input) {
         ports
@@ -1468,7 +1468,7 @@ async fn drive_upgrade(
                     .maintenances
                     .in_namespace(&owner.namespace)
                     .await
-                    .map_err(|e| Failure::new(ReasonCode::KubernetesApiError, e))?;
+                    .map_err(api_failure)?;
                 let bound = weebo_kit_api::BoundInstance::local(&owner.namespace, &owner.name);
                 if let Some(other) = crate::maintenance::writer_running(&others, "", &bound) {
                     return in_progress(
@@ -1483,7 +1483,7 @@ async fn drive_upgrade(
                 .jobs
                 .job(&owner.namespace, &name)
                 .await
-                .map_err(|e| Failure::new(ReasonCode::KubernetesApiError, e))?;
+                .map_err(api_failure)?;
             match upgrade::state(&name, job.as_ref()) {
                 StepState::Absent => {
                     if let Some(job) =

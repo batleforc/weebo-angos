@@ -24,7 +24,7 @@ use weebo_kit_application::emit;
 use weebo_kit_application::ports::{SecretOwner, SecretStore};
 use weebo_kit_application::workload::OwnedObject;
 
-use super::{Outcome, instance_failure, workload_failure};
+use super::{Outcome, api_failure, instance_failure, workload_failure};
 use crate::ports::{
     AttachedInstances, Credentials, KeyGenerator, OwnedObjects, Owner, PasswordHasher,
 };
@@ -126,7 +126,7 @@ async fn run(
         .instances
         .instance(&bound)
         .await
-        .map_err(|e| Failure::new(ReasonCode::KubernetesApiError, e))?
+        .map_err(api_failure)?
         .ok_or_else(|| Failure::new(ReasonCode::InstanceNotFound, format!("{bound} is gone")))?;
 
     // The password, hashed, in the identity's own Secret.

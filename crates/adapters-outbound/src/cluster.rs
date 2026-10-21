@@ -3,7 +3,7 @@
 //! `angos.weebo.io/credential: "true"`, spec 2.8), the cluster's
 //! ServiceAccount issuer, and fresh keys.
 
-use application::ports::{ClusterIssuer, CredentialError, Credentials, KeyGenerator};
+use application::ports::{ApiError, ClusterIssuer, CredentialError, Credentials, KeyGenerator};
 use base64::Engine;
 use k8s_openapi::api::core::v1::Secret;
 use kube::api::Api;
@@ -134,21 +134,23 @@ impl KubeClusterIssuer {
 
 #[async_trait::async_trait]
 impl ClusterIssuer for KubeClusterIssuer {
-    async fn issuer(&self) -> Result<String, String> {
+    async fn issuer(&self) -> Result<String, ApiError> {
         self.issuer
             .get_or_try_init(|| async {
                 let request = http::Request::get("/.well-known/openid-configuration")
                     .body(Vec::new())
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| ApiError::Failed(e.to_string()))?;
                 let discovery: serde_json::Value = self
                     .client
                     .request(request)
                     .await
-                    .map_err(|e| format!("the API server's OIDC discovery: {e}"))?;
+                    .map_err(crate::api_error("the API server's OIDC discovery"))?;
                 discovery["issuer"]
                     .as_str()
                     .map(String::from)
-                    .ok_or_else(|| "the API server's OIDC discovery has no issuer".to_string())
+                    .ok_or_else(|| {
+                        ApiError::Failed("the API server's OIDC discovery has no issuer".into())
+                    })
             })
             .await
             .cloned()
