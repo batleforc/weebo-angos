@@ -8,6 +8,8 @@ use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::Pod;
 use kube::api::{Api, ListParams};
 use kube::{Client, ResourceExt};
+use weebo_kit_adapters::instance::STORE_READY_TIMEOUT;
+use weebo_kit_runtime::shared::SharedWatches;
 
 pub struct KubeJobs {
     client: Client,
@@ -74,17 +76,44 @@ impl Jobs for KubeJobs {
 
 pub struct KubeMaintenances {
     client: Client,
+    /// The binary's shared watches: the maintenances read from the store
+    /// once listed, from the API otherwise.
+    watches: SharedWatches,
 }
 
 impl KubeMaintenances {
     pub fn new(client: Client) -> Self {
-        Self { client }
+        Self {
+            client,
+            watches: SharedWatches::default(),
+        }
+    }
+
+    /// Read the maintenances from the binary's shared watches instead of a
+    /// LIST on every pass.
+    pub fn with_watches(mut self, watches: SharedWatches) -> Self {
+        self.watches = watches;
+        self
     }
 }
 
 #[async_trait::async_trait]
 impl MaintenanceDirectory for KubeMaintenances {
     async fn in_namespace(&self, namespace: &str) -> Result<Vec<Maintenance>, String> {
+        if let Some(shared) = self.watches.get::<Maintenance>() {
+            let store = shared.store();
+            // An unsynced store is never read as empty.
+            if weebo_kit_adapters::wait_synced(&store, STORE_READY_TIMEOUT).await {
+                let mut found: Vec<Maintenance> = store
+                    .state()
+                    .iter()
+                    .filter(|m| m.namespace().as_deref() == Some(namespace))
+                    .map(|m| Maintenance::clone(m))
+                    .collect();
+                found.sort_by_key(ResourceExt::name_any);
+                return Ok(found);
+            }
+        }
         Api::<Maintenance>::namespaced(self.client.clone(), namespace)
             .list(&ListParams::default())
             .await

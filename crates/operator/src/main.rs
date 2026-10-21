@@ -148,7 +148,7 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
             adapters_outbound::maintenance_settings(allowed_images.clone()),
         )),
         jobs: Arc::new(KubeJobs::new(client.clone())),
-        maintenances: Arc::new(KubeMaintenances::new(client.clone())),
+        maintenances: Arc::new(KubeMaintenances::new(client.clone()).with_watches(watches.clone())),
         secret_store: Arc::new(K8sSecretStore::new(
             client.clone(),
             controller::FIELD_MANAGER,

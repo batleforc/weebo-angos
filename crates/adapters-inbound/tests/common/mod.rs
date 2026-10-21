@@ -57,7 +57,9 @@ pub fn ctx(client: &Client, scope: WatchScope, logs: Arc<FakePodLogs>) -> (Arc<C
             adapters_outbound::maintenance_settings(vec![api::angos::IMAGE_REPOSITORY.into()]),
         )),
         jobs: Arc::new(adapters_outbound::KubeJobs::new(client.clone())),
-        maintenances: Arc::new(adapters_outbound::KubeMaintenances::new(client.clone())),
+        maintenances: Arc::new(
+            adapters_outbound::KubeMaintenances::new(client.clone()).with_watches(watches.clone()),
+        ),
         secret_store: Arc::new(weebo_kit_adapters::K8sSecretStore::new(
             client.clone(),
             controller::FIELD_MANAGER,

@@ -6,7 +6,9 @@
 //! are in its namespace or one its `repositorySelector.namespaces`
 //! accepts (a consent withdrawn after the binding takes them out).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use api::local_instance::RepositorySelector;
 use api::{Identity, Repository};
@@ -29,7 +31,19 @@ pub struct KubeRepositories {
     /// The binary's shared watches: each kind read from its store once
     /// listed, from the API otherwise.
     watches: SharedWatches,
+    /// The labels of the namespaces read lately (no watch on Namespaces):
+    /// one GET per namespace per [`NAMESPACE_LABELS_TTL`], not per pass.
+    namespace_labels: Mutex<HashMap<String, (Instant, Labels)>>,
 }
+
+/// A namespace's labels (`None`: it doesn't exist).
+type Labels = Option<BTreeMap<String, String>>;
+
+/// How long a namespace's labels are trusted: a consent withdrawn takes
+/// at most this long to be seen.
+const NAMESPACE_LABELS_TTL: Duration = Duration::from_secs(30);
+/// At most this many namespaces' labels kept.
+const NAMESPACE_LABELS_CAP: usize = 1024;
 
 impl KubeRepositories {
     pub fn new(client: Client) -> Self {
@@ -38,6 +52,7 @@ impl KubeRepositories {
             watched_namespace: None,
             selector: None,
             watches: SharedWatches::default(),
+            namespace_labels: Mutex::default(),
         }
     }
 
@@ -49,14 +64,20 @@ impl KubeRepositories {
         self
     }
 
-    /// Every `K` in the operator's scope: from its shared watch once it
-    /// has listed (an unsynced store is never read as empty), from the API
-    /// otherwise; sorted as the API server would.
-    async fn list<K: Bound>(&self) -> Result<Vec<K>, String> {
+    /// Every `K` in the operator's scope that `keep` keeps: from its
+    /// shared watch once it has listed (an unsynced store is never read as
+    /// empty; only the kept objects are cloned), from the API otherwise;
+    /// sorted as the API server would.
+    async fn list<K: Bound>(&self, keep: impl Fn(&K) -> bool) -> Result<Vec<K>, String> {
         if let Some(shared) = self.watches.get::<K>() {
             let store = shared.store();
             if weebo_kit_adapters::wait_synced(&store, STORE_READY_TIMEOUT).await {
-                let mut all: Vec<K> = store.state().iter().map(|o| K::clone(o)).collect();
+                let mut all: Vec<K> = store
+                    .state()
+                    .iter()
+                    .filter(|o| keep(o))
+                    .map(|o| K::clone(o))
+                    .collect();
                 all.sort_by_key(|o| (o.namespace(), o.name_any()));
                 return Ok(all);
             }
@@ -71,7 +92,7 @@ impl KubeRepositories {
         };
         api.list(&params)
             .await
-            .map(|l| l.items)
+            .map(|l| l.items.into_iter().filter(|o| keep(o)).collect())
             .map_err(|e| format!("listing {}: {e}", K::kind(&())))
     }
 
@@ -115,11 +136,9 @@ impl Bound for Identity {
 #[async_trait::async_trait]
 impl RepositoryDirectory for KubeRepositories {
     async fn aiming_at(&self, instance: &Owner) -> Result<Vec<String>, String> {
-        let listed = self.list::<Repository>().await?;
         let bound = BoundInstance::local(instance.namespace.clone(), instance.name.clone());
-        Ok(listed
-            .into_iter()
-            .filter(|repo| {
+        let listed = self
+            .list::<Repository>(|repo| {
                 let namespace = repo.namespace().unwrap_or_default();
                 match repo.bound() {
                     Some(b) => *b == bound,
@@ -135,6 +154,9 @@ impl RepositoryDirectory for KubeRepositories {
                     },
                 }
             })
+            .await?;
+        Ok(listed
+            .into_iter()
             .map(|repo| {
                 format!(
                     "{}/{}",
@@ -198,8 +220,8 @@ impl KubeRepositories {
         instance: &Owner,
         selector: &RepositorySelector,
     ) -> Result<Vec<K>, String> {
-        let listed = self.list::<K>().await?;
         let bound = BoundInstance::local(instance.namespace.clone(), instance.name.clone());
+        let listed = self.list::<K>(|o| o.bound() == Some(&bound)).await?;
         let own: Option<Selector> = selector
             .selector
             .clone()
@@ -207,12 +229,8 @@ impl KubeRepositories {
             .transpose()
             .map_err(|e| format!("repositorySelector.selector: {e}"))?;
         let shared = selector.namespaces.shared_with();
-        let mut labels_of: BTreeMap<String, Option<BTreeMap<String, String>>> = BTreeMap::new();
         let mut out = Vec::new();
         for repo in listed {
-            if repo.bound() != Some(&bound) {
-                continue;
-            }
             let namespace = repo.namespace().unwrap_or_default();
             if let Some(own) = &own
                 && !own.matches(repo.labels())
@@ -220,21 +238,41 @@ impl KubeRepositories {
                 continue;
             }
             if namespace != instance.namespace {
-                if !labels_of.contains_key(&namespace) {
-                    let labels = Api::<Namespace>::all(self.client.clone())
-                        .get_opt(&namespace)
-                        .await
-                        .map_err(|e| format!("reading namespace {namespace}: {e}"))?
-                        .map(|n| n.labels().clone());
-                    labels_of.insert(namespace.clone(), labels);
-                }
-                let labels = labels_of[&namespace].as_ref();
-                if !shares_with(shared.as_ref(), Some(&namespace), labels) {
+                let labels = self.labels_of(&namespace).await?;
+                if !shares_with(shared.as_ref(), Some(&namespace), labels.as_ref()) {
                     continue;
                 }
             }
             out.push(repo);
         }
         Ok(out)
+    }
+    /// The labels of `namespace` (`None`: it doesn't exist), from the
+    /// cache while fresh.
+    async fn labels_of(&self, namespace: &str) -> Result<Labels, String> {
+        let cache = || {
+            self.namespace_labels
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+        };
+        if let Some((at, labels)) = cache().get(namespace)
+            && at.elapsed() < NAMESPACE_LABELS_TTL
+        {
+            return Ok(labels.clone());
+        }
+        let labels = Api::<Namespace>::all(self.client.clone())
+            .get_opt(namespace)
+            .await
+            .map_err(|e| format!("reading namespace {namespace}: {e}"))?
+            .map(|n| n.labels().clone());
+        let mut cache = cache();
+        if cache.len() >= NAMESPACE_LABELS_CAP {
+            cache.retain(|_, (at, _)| at.elapsed() < NAMESPACE_LABELS_TTL);
+            if cache.len() >= NAMESPACE_LABELS_CAP {
+                cache.clear();
+            }
+        }
+        cache.insert(namespace.to_owned(), (Instant::now(), labels.clone()));
+        Ok(labels)
     }
 }
