@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.1.6](https://github.com/batleforc/weebo-angos/compare/89e7941520212a507e2eed0b27c9e2c8f07f6673..v0.1.6) - 2026-10-21
+#### Bug Fixes
+- weebo-good-practice review: house lints, bounded I/O, typed errors (#19) - ([89e7941](https://github.com/batleforc/weebo-angos/commit/89e7941520212a507e2eed0b27c9e2c8f07f6673)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.1.5](https://github.com/batleforc/weebo-angos/compare/54dccd842bfbaa3f91d011848411e516b26e7cd6..v0.1.5) - 2026-10-21
 #### Miscellaneous Chores
 - (**kit**) weebo-operator-kit v0.22.1, a cleanup waiting on a rollout retried in 15s (#18) - ([54dccd8](https://github.com/batleforc/weebo-angos/commit/54dccd842bfbaa3f91d011848411e516b26e7cd6)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
