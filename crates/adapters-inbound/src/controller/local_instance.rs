@@ -236,5 +236,5 @@ async fn apply(
         )
         .await;
     }
-    Ok(super::requeue_after(&report.outcome))
+    Ok(super::requeue_after(instance, &report.outcome))
 }

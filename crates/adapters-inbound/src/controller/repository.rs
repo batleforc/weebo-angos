@@ -146,5 +146,5 @@ async fn apply(obj: Arc<Repository>, ctx: Arc<Ctx>) -> Result<Action, Error> {
         },
     )
     .await?;
-    Ok(super::requeue_waiting(&report.outcome))
+    Ok(super::requeue_waiting(obj.as_ref(), &report.outcome))
 }

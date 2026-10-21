@@ -4,7 +4,7 @@
 
 use std::fmt::Debug;
 use std::sync::{Arc, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use api::Status;
 use api::status::Condition;
@@ -183,24 +183,34 @@ impl Error {
 }
 
 /// Every reconcile that errors out is announced by a `Warning` Event on
-/// its CR, then retried in ~30s (the kit's).
+/// its CR, then retried in ~30s, backing off while it keeps failing (the
+/// kit's). A cleanup waiting on its instance's rollout is read again soon,
+/// as [`requeue_after`] does: it is a wait, not a failure.
 pub fn error_policy<K>(obj: Arc<K>, err: &Error, ctx: Arc<Ctx>) -> Action
 where
     K: Resource<DynamicType = ()>,
 {
     let (reason, action) = err.reason();
-    weebo_kit_runtime::controller::retry_after_error(
+    let retry = weebo_kit_runtime::controller::retry_after_error(
         &ctx.recorder,
         obj.object_ref(&()),
         reason,
         action,
         err,
-    )
+    );
+    if matches!(
+        reason,
+        ReasonCode::ConfigPropagating | ReasonCode::UpgradeInProgress
+    ) {
+        Action::requeue(Duration::from_secs(15))
+    } else {
+        retry
+    }
 }
 
 /// Steady-state drift check after a success, a quick retry after a
-/// failure (both jittered — the kit's).
-pub fn requeue_after(outcome: &Outcome) -> Action {
+/// failure, backing off while `obj` keeps failing (jittered — the kit's).
+pub fn requeue_after<K: Resource>(obj: &K, outcome: &Outcome) -> Action {
     match &outcome.ready {
         // A reload being confirmed (its logs), an upgrade's Job (not
         // watched): read again soon. A rollout's progress comes through the
@@ -211,28 +221,30 @@ pub fn requeue_after(outcome: &Outcome) -> Action {
                 ReasonCode::ConfigPropagating | ReasonCode::UpgradeInProgress
             ) =>
         {
-            weebo_kit_runtime::controller::requeue_after(false, Some(15))
+            weebo_kit_runtime::controller::requeue_after(obj, false, Some(15))
         }
         Err(f) if f.reason == ReasonCode::WorkloadNotReady => {
-            weebo_kit_runtime::controller::requeue_after(true, None)
+            weebo_kit_runtime::controller::requeue_after(obj, true, None)
         }
-        Err(f) => weebo_kit_runtime::controller::requeue_after(f.reason.needs_a_change(), None),
+        Err(f) => {
+            weebo_kit_runtime::controller::requeue_after(obj, f.reason.needs_a_change(), None)
+        }
         Ok(_)
             if outcome
                 .advisories
                 .iter()
                 .any(|a| a.reason == ReasonCode::StorageChangePending) =>
         {
-            weebo_kit_runtime::controller::requeue_after(false, None)
+            weebo_kit_runtime::controller::requeue_after(obj, false, None)
         }
-        Ok(_) => weebo_kit_runtime::controller::requeue_after(true, None),
+        Ok(_) => weebo_kit_runtime::controller::requeue_after(obj, true, None),
     }
 }
 
 /// [`requeue_after`] for what waits on its instance (a repository, an
 /// identity): the instance's status changes wake it through the watch, the
 /// steady interval is the fallback.
-pub fn requeue_waiting(outcome: &Outcome) -> Action {
+pub fn requeue_waiting<K: Resource>(obj: &K, outcome: &Outcome) -> Action {
     match &outcome.ready {
         Err(f)
             if matches!(
@@ -240,9 +252,9 @@ pub fn requeue_waiting(outcome: &Outcome) -> Action {
                 ReasonCode::ConfigPropagating | ReasonCode::WorkloadNotReady
             ) =>
         {
-            weebo_kit_runtime::controller::requeue_after(true, None)
+            weebo_kit_runtime::controller::requeue_after(obj, true, None)
         }
-        _ => requeue_after(outcome),
+        _ => requeue_after(obj, outcome),
     }
 }
 
