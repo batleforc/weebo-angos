@@ -50,12 +50,19 @@ impl Credentials for KubeCredentials {
                 ),
             ));
         }
-        Ok(secret
+        // A key that isn't UTF-8 is said so, not dropped (it would read as
+        // missing).
+        secret
             .data
             .unwrap_or_default()
             .into_iter()
-            .filter_map(|(k, v)| Some((k, String::from_utf8(v.0).ok()?)))
-            .collect())
+            .map(|(k, v)| match String::from_utf8(v.0) {
+                Ok(v) => Ok((k, v)),
+                Err(_) => Err(CredentialError::Missing(format!(
+                    "secret {namespace}/{name}: key {k:?} is not UTF-8"
+                ))),
+            })
+            .collect()
     }
 
     async fn read(

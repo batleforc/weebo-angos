@@ -7,14 +7,17 @@
 //!   that doesn't exist yet is let through, the reconcile waits for it;
 //! - an `AngosRepository` is refused when its vocabulary or its rules
 //!   don't hold, or when its prefix overlaps a repository already bound to
-//!   its instance (spec 4.2);
+//!   its instance (spec 4.2), or when its instance can't be read;
 //! - an `AngosMaintenance` whose schedule doesn't read.
 
 use std::sync::Arc;
 
 use api::{LocalInstance, Repository};
 use application::admission::{check_instance, referenced_secrets};
-use application::ports::{AttachedInstances, CelChecker, Credentials, Owner, RepositoryDirectory};
+use application::ports::{
+    AttachedInstances, CelChecker, Credentials, InstanceError, Owner, RepositoryDirectory,
+    ResolveError, instance_reason,
+};
 use domain::error::ReasonCode;
 use domain::validation::belongs_to;
 use kube::core::DynamicObject;
@@ -120,8 +123,9 @@ impl AngosAdmission {
         let name = object.metadata.name.clone().unwrap_or_default();
         let recorded = repo.status.as_ref().and_then(|s| s.common.instance.clone());
         // Not resolvable yet (no instance): the spec alone is checked, the
-        // reconcile says why it waits.
-        let bound = self
+        // reconcile says why it waits. Any other failure is refused: letting
+        // it through would skip the prefix check below.
+        let bound = match self
             .attached
             .resolve_attached(
                 namespace,
@@ -129,7 +133,16 @@ impl AngosAdmission {
                 recorded.as_ref(),
             )
             .await
-            .ok();
+        {
+            Ok(bound) => Some(bound),
+            Err(InstanceError::Resolve(
+                ResolveError::NoInstance | ResolveError::NotFound { .. },
+            )) => None,
+            Err(e) => {
+                tracing::warn!(namespace, %e, "repository refused: its instance can't be resolved");
+                return Err(Denial::new(instance_reason(&e), e.to_string()));
+            }
+        };
         let instance = match &bound {
             Some(bound) => self
                 .attached
@@ -202,7 +215,7 @@ mod tests {
             _: Option<&weebo_kit_api::InstanceRef>,
             _: Option<&application::ports::BoundInstance>,
         ) -> Result<application::ports::BoundInstance, application::ports::InstanceError> {
-            Err(application::ports::InstanceError::Kubernetes("none".into()))
+            Err(ResolveError::NoInstance.into())
         }
 
         async fn instance(
@@ -339,5 +352,45 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(denied.reason, ReasonCode::InvalidSpec);
+    }
+
+    struct Unreachable;
+
+    #[async_trait::async_trait]
+    impl AttachedInstances for Unreachable {
+        async fn resolve_attached(
+            &self,
+            _: &str,
+            _: Option<&weebo_kit_api::InstanceRef>,
+            _: Option<&application::ports::BoundInstance>,
+        ) -> Result<application::ports::BoundInstance, InstanceError> {
+            Err(InstanceError::Kubernetes("timeout".into()))
+        }
+
+        async fn instance(
+            &self,
+            _: &application::ports::BoundInstance,
+        ) -> Result<Option<LocalInstance>, String> {
+            Ok(None)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_repository_whose_instance_can_t_be_read_is_refused() {
+        let admission = AngosAdmission {
+            attached: Arc::new(Unreachable),
+            ..admission(FakeCredentials::default())
+        };
+        let repo: DynamicObject = serde_json::from_value(json!({
+            "apiVersion": "angos.weebo.io/v1alpha1", "kind": "AngosRepository",
+            "metadata": {"name": "app", "namespace": "team"},
+            "spec": {"prefix": "team", "access": {"pull": ["anonymous"]}},
+        }))
+        .unwrap();
+        let denied = admission
+            .admit("AngosRepository", "team", &repo)
+            .await
+            .unwrap_err();
+        assert_eq!(denied.reason, ReasonCode::KubernetesApiError);
     }
 }

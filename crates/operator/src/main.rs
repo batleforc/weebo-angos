@@ -54,8 +54,14 @@ async fn operator() -> anyhow::Result<()> {
 async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     // `ring` and `aws-lc-rs` are both linked transitively (`kube`'s rustls
     // vs. reqwest's); rustls refuses to pick a default provider when more
-    // than one is present.
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    // than one is present. An `Err` only means one is installed already,
+    // which is all rustls needs.
+    if rustls::crypto::ring::default_provider()
+        .install_default()
+        .is_err()
+    {
+        tracing::debug!("a rustls crypto provider was already installed");
+    }
 
     telemetry.serve_metrics().await?;
     // `<prefix>_leader`: 1 on the replica holding the lease.
@@ -210,7 +216,12 @@ async fn run(telemetry: &telemetry::Telemetry) -> anyhow::Result<()> {
     // instead of making the next leader wait out the TTL.
     leadership.release().await;
     // Bounded: the drain started with the signal, long before.
-    let _ = tokio::time::timeout(Duration::from_secs(30), server.stopped()).await;
+    if tokio::time::timeout(Duration::from_secs(30), server.stopped())
+        .await
+        .is_err()
+    {
+        tracing::warn!("the webhook server was still draining after 30 s; exiting anyway");
+    }
     Ok(())
 }
 
