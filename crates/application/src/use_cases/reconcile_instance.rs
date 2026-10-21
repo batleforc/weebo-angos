@@ -1323,7 +1323,9 @@ async fn run(
             }
             Confirmation::Pending(waiting) => {
                 let overdue = pass.now.duration_since(written)
-                    > SignedDuration::from_secs(spec.reload.timeout_seconds as i64);
+                    > SignedDuration::from_secs(
+                        i64::try_from(spec.reload.timeout_seconds).unwrap_or(i64::MAX),
+                    );
                 let roll = !unreadable.is_empty()
                     || !dead_watchers.is_empty()
                     || (overdue && spec.reload.on_unconfirmed == OnUnconfirmed::Rollout);
