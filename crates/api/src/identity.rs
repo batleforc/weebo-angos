@@ -54,6 +54,8 @@ pub struct AngosIdentitySpec {
     /// The registry's public host (e.g. `registry.example.com`): adds a
     /// `.dockerconfigjson` key to the targets.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    // Drawn by the docs' CRD IDE (the kit's shared schematic kinds).
+    #[schemars(extend("x-weebo-produces" = { "kind": { "group": "schematic.weebo.io", "kind": "DnsName" }, "name": ["."] }))]
     pub registry_host: Option<String>,
     /// A new password every this many days; the annotation
     /// `angos.weebo.io/rotate` (a new value) rotates it at once.

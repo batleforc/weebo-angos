@@ -25,6 +25,16 @@
       "produces": [
         {
           "kind": {
+            "group": "schematic.weebo.io",
+            "kind": "DnsName"
+          },
+          "each": "spec.registryHost",
+          "name": [
+            "."
+          ]
+        },
+        {
+          "kind": {
             "group": "",
             "kind": "Secret"
           },
@@ -201,7 +211,88 @@
           ]
         }
       ],
-      "produces": []
+      "produces": [
+        {
+          "kind": {
+            "group": "schematic.weebo.io",
+            "kind": "OidcIssuer"
+          },
+          "each": "spec.auth.kubernetes.issuer",
+          "name": [
+            "."
+          ]
+        },
+        {
+          "kind": {
+            "group": "schematic.weebo.io",
+            "kind": "OidcIssuer"
+          },
+          "each": "spec.auth.oidc[].issuer",
+          "name": [
+            "."
+          ]
+        },
+        {
+          "kind": {
+            "group": "schematic.weebo.io",
+            "kind": "HttpEndpoint"
+          },
+          "each": "spec.auth.webhooks[].url",
+          "name": [
+            "."
+          ]
+        },
+        {
+          "kind": {
+            "group": "schematic.weebo.io",
+            "kind": "HttpEndpoint"
+          },
+          "each": "spec.eventWebhooks[].url",
+          "name": [
+            "."
+          ]
+        },
+        {
+          "kind": {
+            "group": "schematic.weebo.io",
+            "kind": "HttpEndpoint"
+          },
+          "each": "spec.scan.url",
+          "name": [
+            "."
+          ]
+        },
+        {
+          "kind": {
+            "group": "schematic.weebo.io",
+            "kind": "S3Bucket"
+          },
+          "each": "spec.storage.metadata.s3.bucket",
+          "name": [
+            "."
+          ]
+        },
+        {
+          "kind": {
+            "group": "schematic.weebo.io",
+            "kind": "S3Bucket"
+          },
+          "each": "spec.storage.s3.bucket",
+          "name": [
+            "."
+          ]
+        },
+        {
+          "kind": {
+            "group": "schematic.weebo.io",
+            "kind": "HttpEndpoint"
+          },
+          "each": "spec.tracing.endpoint",
+          "name": [
+            "."
+          ]
+        }
+      ]
     },
     "AngosMaintenance": {
       "references": [
@@ -229,6 +320,55 @@
           ]
         }
       ],
+      "produces": [
+        {
+          "kind": {
+            "group": "schematic.weebo.io",
+            "kind": "HttpEndpoint"
+          },
+          "each": "spec.downstreams[].url",
+          "name": [
+            "."
+          ]
+        },
+        {
+          "kind": {
+            "group": "schematic.weebo.io",
+            "kind": "UpstreamRegistry"
+          },
+          "each": "spec.upstreams[].url",
+          "name": [
+            "."
+          ]
+        }
+      ]
+    },
+    "Database": {
+      "references": [],
+      "produces": []
+    },
+    "DnsName": {
+      "references": [],
+      "produces": []
+    },
+    "HttpEndpoint": {
+      "references": [],
+      "produces": []
+    },
+    "OidcIssuer": {
+      "references": [],
+      "produces": []
+    },
+    "S3Bucket": {
+      "references": [],
+      "produces": []
+    },
+    "UpstreamRegistry": {
+      "references": [],
+      "produces": []
+    },
+    "VaultServer": {
+      "references": [],
       "produces": []
     }
   }

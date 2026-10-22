@@ -144,6 +144,8 @@ pub struct Upstream {
     /// The registry, e.g. `https://registry-1.docker.io`; a path is the
     /// upstream namespace prefix.
     #[schemars(regex(pattern = r"^https?://"))]
+    // Drawn by the docs' CRD IDE (the kit's shared schematic kinds).
+    #[schemars(extend("x-weebo-produces" = { "kind": { "group": "schematic.weebo.io", "kind": "UpstreamRegistry" }, "name": ["."] }))]
     pub url: String,
     /// Basic credentials (`username`, `password` keys), in a Secret of
     /// this namespace labelled `angos.weebo.io/credential: "true"`.
@@ -186,6 +188,8 @@ pub struct Downstream {
     #[schemars(length(min = 1))]
     pub name: String,
     #[schemars(regex(pattern = r"^https?://"))]
+    // Drawn by the docs' CRD IDE (the kit's shared schematic kinds).
+    #[schemars(extend("x-weebo-produces" = { "kind": { "group": "schematic.weebo.io", "kind": "HttpEndpoint" }, "name": ["."] }))]
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credentials_secret_ref: Option<BasicCredentials>,

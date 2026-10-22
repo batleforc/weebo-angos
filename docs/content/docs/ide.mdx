@@ -9,4 +9,12 @@ Add resources, point each reference field (an `instanceRef`, a
 of them writes, and export the whole set as YAML. To start from what runs
 in a cluster, import `kubectl get <kinds> -A -o yaml`.
 
+What lives outside the cluster is drawn too, never exported with the
+manifests: each repository's upstream registry (`upstreams[].url`), the
+instance's S3 buckets, OIDC issuers, scanner, webhooks and trace
+collector, the downstreams a repository replicates to, and each
+identity's registry host. One node per URL: two repositories on Docker
+Hub, or Angos and another operator trusting one issuer, meet on it. The
+drawing downloads as `schematic.yaml`.
+
 <CrdIde />
