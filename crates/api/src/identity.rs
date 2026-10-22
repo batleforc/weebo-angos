@@ -48,6 +48,8 @@ pub struct AngosIdentitySpec {
     /// `.dockerconfigjson` with `registryHost`). Unset: the Secret
     /// `<name>-credentials` of this namespace.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    // The keys each target holds, for the docs' CRD IDE (as `reconcile_identity::target_data` writes them).
+    #[schemars(extend("x-weebo-keys" = ["username", "password", ".dockerconfigjson"]))]
     pub secret_targets: Vec<SecretTarget>,
     /// The registry's public host (e.g. `registry.example.com`): adds a
     /// `.dockerconfigjson` key to the targets.

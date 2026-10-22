@@ -2,21 +2,37 @@
   {
     "kind": "AngosLocalInstance",
     "singular": "angoslocalinstance",
-    "scope": "Namespaced"
+    "scope": "Namespaced",
+    "apiVersion": "angos.weebo.io/v1alpha1",
+    "served": [
+      "v1alpha1"
+    ]
   },
   {
     "kind": "AngosRepository",
     "singular": "angosrepository",
-    "scope": "Namespaced"
+    "scope": "Namespaced",
+    "apiVersion": "angos.weebo.io/v1alpha1",
+    "served": [
+      "v1alpha1"
+    ]
   },
   {
     "kind": "AngosIdentity",
     "singular": "angosidentity",
-    "scope": "Namespaced"
+    "scope": "Namespaced",
+    "apiVersion": "angos.weebo.io/v1alpha1",
+    "served": [
+      "v1alpha1"
+    ]
   },
   {
     "kind": "AngosMaintenance",
     "singular": "angosmaintenance",
-    "scope": "Namespaced"
+    "scope": "Namespaced",
+    "apiVersion": "angos.weebo.io/v1alpha1",
+    "served": [
+      "v1alpha1"
+    ]
   }
 ]
