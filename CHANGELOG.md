@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.2.0](https://github.com/batleforc/weebo-angos/compare/c1e0587a96c2ab38a73736b11e0136ae52998b43..v0.2.0) - 2026-10-22
+#### Features
+- kit v0.23.0, the CRD IDE in the docs (#20) - ([c1e0587](https://github.com/batleforc/weebo-angos/commit/c1e0587a96c2ab38a73736b11e0136ae52998b43)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
+
+- - -
+
 ## [v0.1.6](https://github.com/batleforc/weebo-angos/compare/89e7941520212a507e2eed0b27c9e2c8f07f6673..v0.1.6) - 2026-10-21
 #### Bug Fixes
 - weebo-good-practice review: house lints, bounded I/O, typed errors (#19) - ([89e7941](https://github.com/batleforc/weebo-angos/commit/89e7941520212a507e2eed0b27c9e2c8f07f6673)) - Maxime, Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context), Claude Opus 5.5 (1M context)
