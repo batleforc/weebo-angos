@@ -142,6 +142,8 @@ pub struct MetadataStorage {
 pub struct S3Storage {
     /// The S3 endpoint URL, e.g. `https://s3.example.com`.
     pub endpoint: String,
+    // Drawn by the docs' CRD IDE (the kit's shared schematic kinds).
+    #[schemars(extend("x-weebo-produces" = { "kind": { "group": "schematic.weebo.io", "kind": "S3Bucket" }, "name": ["."] }))]
     pub bucket: String,
     /// The bucket's region (`us-east-1` for most S3-compatible stores).
     pub region: String,
@@ -574,6 +576,8 @@ pub struct AuthWebhook {
     #[schemars(regex(pattern = r"^[A-Za-z0-9_-]+$"), length(min = 1, max = 63))]
     pub name: String,
     #[schemars(regex(pattern = r"^https?://"))]
+    // Drawn by the docs' CRD IDE (the kit's shared schematic kinds).
+    #[schemars(extend("x-weebo-produces" = { "kind": { "group": "schematic.weebo.io", "kind": "HttpEndpoint" }, "name": ["."] }))]
     pub url: String,
     /// How long Angos waits for an answer (required by Angos).
     #[schemars(range(min = 1))]
@@ -605,6 +609,8 @@ pub struct AuthWebhook {
 pub struct Scan {
     /// The scanner's base URL (Angos posts to `<url>/scan`).
     #[schemars(regex(pattern = r"^https?://"))]
+    // Drawn by the docs' CRD IDE (the kit's shared schematic kinds).
+    #[schemars(extend("x-weebo-produces" = { "kind": { "group": "schematic.weebo.io", "kind": "HttpEndpoint" }, "name": ["."] }))]
     pub url: String,
     /// The scanner's token, from a Secret labelled
     /// `angos.weebo.io/credential: "true"`.
@@ -640,6 +646,8 @@ pub struct EventWebhook {
     #[schemars(regex(pattern = r"^[A-Za-z0-9_-]+$"), length(min = 1, max = 63))]
     pub name: String,
     #[schemars(regex(pattern = r"^https?://"))]
+    // Drawn by the docs' CRD IDE (the kit's shared schematic kinds).
+    #[schemars(extend("x-weebo-produces" = { "kind": { "group": "schematic.weebo.io", "kind": "HttpEndpoint" }, "name": ["."] }))]
     pub url: String,
     /// `Required`: the request fails when the webhook does; `Optional`:
     /// tried, never blocking; `Async`: sent in the background.
@@ -707,6 +715,8 @@ pub struct OidcProvider {
     /// The issuer, compared **exactly** with the one the provider
     /// advertises (trailing slash included).
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    // Drawn by the docs' CRD IDE (the kit's shared schematic kinds).
+    #[schemars(extend("x-weebo-produces" = { "kind": { "group": "schematic.weebo.io", "kind": "OidcIssuer" }, "name": ["."] }))]
     pub issuer: Option<String>,
     /// The issuer from a Secret of the namespace (e.g. the `AUTHENTIK_URL`
     /// a weebo-authentik application writes), labelled
@@ -755,6 +765,8 @@ pub struct KubernetesAuth {
     /// operator from the API server's discovery (required when the
     /// operator is limited to one namespace).
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    // Drawn by the docs' CRD IDE (the kit's shared schematic kinds).
+    #[schemars(extend("x-weebo-produces" = { "kind": { "group": "schematic.weebo.io", "kind": "OidcIssuer" }, "name": ["."] }))]
     pub issuer: Option<String>,
     /// Default: `https://kubernetes.default.svc/openid/v1/jwks`, read with
     /// the instance's own account token. That account must be bound to
@@ -792,6 +804,8 @@ pub struct TokenService {
 #[serde(rename_all = "camelCase")]
 pub struct Tracing {
     /// The OTLP gRPC endpoint.
+    // Drawn by the docs' CRD IDE (the kit's shared schematic kinds).
+    #[schemars(extend("x-weebo-produces" = { "kind": { "group": "schematic.weebo.io", "kind": "HttpEndpoint" }, "name": ["."] }))]
     pub endpoint: String,
     /// The share of traces kept, from 0 to 1.
     #[schemars(range(min = 0.0, max = 1.0))]
