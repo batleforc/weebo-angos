@@ -144,6 +144,16 @@ pub fn job(
         });
         mounts.push(mount(volume, &fs.root_dir, false));
     }
+    // What the instance gives its server (a CA bundle the store's endpoint
+    // needs, typically): the Job reaches the same store.
+    volumes.extend(ispec.extra_volumes.iter().cloned());
+    mounts.extend(ispec.extra_volume_mounts.iter().cloned());
+    let mut env = vec![EnvVar {
+        name: "RUST_LOG".into(),
+        value: Some("info".into()),
+        ..Default::default()
+    }];
+    env.extend(ispec.env.iter().filter(|e| e.name != "RUST_LOG").cloned());
     let labels = BTreeMap::from([
         (
             "app.kubernetes.io/name".to_string(),
@@ -221,11 +231,8 @@ pub fn job(
                             .chain(args(spec))
                             .collect(),
                         ),
-                        env: Some(vec![EnvVar {
-                            name: "RUST_LOG".into(),
-                            value: Some("info".into()),
-                            ..Default::default()
-                        }]),
+                        env: Some(env),
+                        env_from: (!ispec.env_from.is_empty()).then(|| ispec.env_from.clone()),
                         resources: spec.resources.clone(),
                         security_context: Some(
                             ispec
@@ -385,6 +392,61 @@ mod tests {
         );
         assert!(unreachable_store(&without_volume).is_some());
         assert!(unreachable_store(&instance).is_none());
+    }
+
+    #[test]
+    fn the_job_gets_the_instance_s_env_and_extra_volumes() {
+        let instance = LocalInstance::new(
+            "reg",
+            serde_json::from_value(json!({
+                "storage": {"s3": {"endpoint": "https://s3.internal", "bucket": "b", "region": "r",
+                    "credentialsSecretRef": {"name": "s3"}}},
+                "env": [
+                    {"name": "SSL_CERT_FILE", "value": "/etc/ssl/internal/ca.crt"},
+                    {"name": "RUST_LOG", "value": "debug"}
+                ],
+                "envFrom": [{"configMapRef": {"name": "proxy"}}],
+                "extraVolumes": [{"name": "ca", "configMap": {"name": "internal-ca"}}],
+                "extraVolumeMounts": [{"name": "ca", "mountPath": "/etc/ssl/internal", "readOnly": true}]
+            }))
+            .unwrap(),
+        );
+        let job = job(
+            "scrub-1",
+            "scrub",
+            "team",
+            &spec(json!({"task": "Scrub"})),
+            &instance,
+            "ghcr.io/project-angos/angos:1.12.3",
+            "0123456789",
+        );
+        let pod = &job.manifest["spec"]["template"]["spec"];
+        let container = &pod["containers"][0];
+        assert_eq!(
+            container["env"],
+            json!([
+                {"name": "RUST_LOG", "value": "info"},
+                {"name": "SSL_CERT_FILE", "value": "/etc/ssl/internal/ca.crt"}
+            ])
+        );
+        assert_eq!(
+            container["envFrom"],
+            json!([{"configMapRef": {"name": "proxy"}}])
+        );
+        assert!(
+            pod["volumes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v["name"] == "ca" && v["configMap"]["name"] == "internal-ca")
+        );
+        assert!(
+            container["volumeMounts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|m| m["name"] == "ca" && m["mountPath"] == "/etc/ssl/internal")
+        );
     }
 
     #[test]
