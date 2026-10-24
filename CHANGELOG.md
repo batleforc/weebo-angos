@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.3.1](https://github.com/batleforc/weebo-angos/compare/581a7b7c5427fcf99c3d043dfcf34d6e69a34281..v0.3.1) - 2026-10-24
+#### Bug Fixes
+- maintenance and upgrade Jobs get the instance's env and extra volumes (#22) - ([581a7b7](https://github.com/batleforc/weebo-angos/commit/581a7b7c5427fcf99c3d043dfcf34d6e69a34281)) - Maxime, Claude Opus 5.5
+
+- - -
+
 ## [v0.3.0](https://github.com/batleforc/weebo-angos/compare/1a5cdcbece73202ab3427a7cb5b3ff917c66b9a1..v0.3.0) - 2026-10-22
 #### Features
 - kit v0.24.0, registries, buckets, issuers and webhooks drawn in the CRD IDE (#21) - ([1a5cdcb](https://github.com/batleforc/weebo-angos/commit/1a5cdcbece73202ab3427a7cb5b3ff917c66b9a1)) - Maxime, Claude Opus 5.5 (1M context)
