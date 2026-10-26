@@ -15,23 +15,23 @@ windows.
 ## Budget
 
 The limits are the kit's small-cluster budget (a few operators on a
-2-4 GiB node). The last run committed with the docs (`perf/weebo-angos.json`, on 2026-10-16 with weebo-kit-perf 0.17.0) measured
+2-4 GiB node). The last run committed with the docs (`perf/weebo-angos.json`, on 2026-10-26 with weebo-kit-perf 0.24.0) measured
 200 `angosrepositories` per load; each value is the worst phase for that limit.
 
 | Limit | Budget | Measured |  |
 | --- | --- | --- | --- |
 | Startup: spawn → leader lease held | 15 s | 0.10 s | ok |
 | Shutdown: SIGTERM → exit | 15 s | 0.01 s | ok |
-| Memory at rest (median RSS of every idle window) | 64 MiB | 58.4 MiB | ok |
-| Peak memory over the whole run | 192 MiB | 58.4 MiB | ok |
+| Memory at rest (median RSS of every idle window) | 64 MiB | 48.7 MiB | ok |
+| Peak memory over the whole run | 192 MiB | 48.7 MiB | ok |
 | CPU at rest (mean of every idle window) | 10 m | 0.34 m | ok |
-| CPU time per object of a load | 50 ms | 17.3 ms | ok |
-| apiserver requests at rest | 60 req/min | 31.9 req/min | ok |
-| apiserver requests per object of a load | 20 req | 10.9 req | ok |
-| Time for 100 objects of a load to converge | 60 s | 8.54 s | ok |
-| Reconcile p95, any phase | 2 s | 0.00 s | ok |
-| Memory not given back: final vs baseline idle window | 10 % | 6.02 % | ok |
-| File descriptors not given back | 16 | 0 | ok |
+| CPU time per object of a load | 50 ms | 41.9 ms | ok |
+| apiserver requests at rest | 60 req/min | 47.9 req/min | ok |
+| apiserver requests per object of a load | 20 req | 11.1 req | ok |
+| Time for 100 objects of a load to converge | 60 s | 9.95 s | ok |
+| Reconcile p95, any phase | 2 s | 0.02 s | ok |
+| Memory not given back: final vs baseline idle window | 10 % | 7.36 % | ok |
+| File descriptors not given back | 16 | 1 | ok |
 | Threads not given back | 4 | 0 | ok |
 
 ## Measuring it again
