@@ -330,3 +330,31 @@ async fn a_prune_waits_for_a_repository_not_bound_yet() {
     assert!(report.outcome.advisories[0].message.contains("team/new"));
     assert_eq!(world.status.run_count, 0);
 }
+
+#[test]
+fn status_fields_null_what_the_last_run_had() {
+    let finished: MaintenanceStatus = serde_json::from_value(json!({
+        "lastRun": {"state": "Failed", "startTime": "t0", "completionTime": "t1",
+                    "jobName": "j0", "exitCode": 1, "message": "boom"},
+        "runCount": 1,
+    }))
+    .unwrap();
+    let mut running = finished.clone();
+    running.last_run = Some(Run {
+        state: RunState::Running,
+        start_time: "t2".into(),
+        completion_time: None,
+        job_name: "j1".into(),
+        exit_code: None,
+        message: None,
+        dry_run: false,
+    });
+    let fields = status_fields(&finished, &running);
+    let run = &fields["lastRun"];
+    assert_eq!(run["state"], json!("Running"));
+    for key in ["completionTime", "exitCode", "message"] {
+        assert_eq!(run[key], serde_json::Value::Null, "{key}");
+    }
+    assert_eq!(fields["nextRunTime"], serde_json::Value::Null);
+    assert!(!fields.contains_key("conditions"));
+}

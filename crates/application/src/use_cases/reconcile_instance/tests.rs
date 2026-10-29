@@ -611,10 +611,71 @@ async fn the_cluster_issuer_is_read_for_kubernetes_tokens() {
 
 #[tokio::test]
 async fn status_fields_clear_what_a_pass_unset() {
-    let fields = status_fields(&InstanceStatus::default());
+    let fields = status_fields(&InstanceStatus::default(), &InstanceStatus::default());
     assert_eq!(fields["pendingBootHash"], serde_json::Value::Null);
     assert_eq!(fields["pods"], json!([]));
     assert!(!fields.contains_key("conditions"));
+}
+
+fn with_maps(keys: &[&str]) -> InstanceStatus {
+    let render = |key: &&str| (key.to_string(), json!({"prefix": key, "state": "Rendered"}));
+    let identity = |key: &&str| {
+        (
+            key.to_string(),
+            json!({"username": key, "state": "Rendered"}),
+        )
+    };
+    let released = |key: &&str| (key.to_string(), json!("2026-01-01T00:00:00Z"));
+    serde_json::from_value(json!({
+        "repositories": keys.iter().map(render).collect::<serde_json::Map<_, _>>(),
+        "identities": keys.iter().map(identity).collect::<serde_json::Map<_, _>>(),
+        "releasedRepositories": keys.iter().map(released).collect::<serde_json::Map<_, _>>(),
+    }))
+    .unwrap()
+}
+
+const MAPS: [&str; 3] = ["repositories", "identities", "releasedRepositories"];
+
+#[tokio::test]
+async fn status_fields_null_a_key_that_left_a_map() {
+    let fields = status_fields(&with_maps(&["ns/a", "ns/b"]), &with_maps(&["ns/b"]));
+    for map in MAPS {
+        assert_eq!(fields[map]["ns/a"], serde_json::Value::Null, "{map}");
+        assert_ne!(fields[map]["ns/b"], serde_json::Value::Null, "{map}");
+    }
+}
+
+#[tokio::test]
+async fn status_fields_null_a_map_emptied() {
+    let fields = status_fields(&with_maps(&["ns/a"]), &with_maps(&[]));
+    for map in MAPS {
+        assert_eq!(fields[map], serde_json::Value::Null, "{map}");
+    }
+}
+
+#[tokio::test]
+async fn status_fields_send_no_null_for_an_unchanged_map() {
+    let status = with_maps(&["ns/a", "ns/b"]);
+    let fields = status_fields(&status, &status);
+    for map in MAPS {
+        let entries = fields[map].as_object().unwrap();
+        assert_eq!(entries.len(), 2, "{map}");
+        assert!(entries.values().all(|v| !v.is_null()), "{map}");
+    }
+}
+
+#[tokio::test]
+async fn status_fields_null_what_left_an_entry() {
+    let mut previous = with_maps(&["ns/a"]);
+    let entry = previous.repositories.get_mut("ns/a").unwrap();
+    entry.state = api::status::RenderState::Conflict;
+    entry.message = Some("overlaps".into());
+    entry.applied_generation = Some(3);
+    let fields = status_fields(&previous, &with_maps(&["ns/a"]));
+    let entry = &fields["repositories"]["ns/a"];
+    assert_eq!(entry["state"], json!("Rendered"));
+    assert_eq!(entry["message"], serde_json::Value::Null);
+    assert_eq!(entry["appliedGeneration"], serde_json::Value::Null);
 }
 
 #[tokio::test]

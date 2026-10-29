@@ -13,7 +13,7 @@ use adapters_inbound::controller;
 use api::{LocalInstance, Repository};
 use k8s_openapi::api::core::v1::{Namespace, Secret};
 use kube::Client;
-use kube::api::{Api, ObjectMeta, PostParams};
+use kube::api::{Api, ObjectMeta, Patch, PatchParams, PostParams};
 use weebo_kit_runtime::WatchScope;
 
 mod common;
@@ -185,5 +185,36 @@ async fn repositories_are_rendered_into_their_instance() {
     .await;
     assert_eq!(ci, ("ConfigPropagating".into(), Some(1)));
     assert!(secrets.get_opt("ci-credentials").await.unwrap().is_none());
+
+    // A repository deleted while others stay (held by its finalizer: no pod
+    // ever runs without it here): its entry leaves the instance's status (a
+    // merge patch keeps a key it isn't sent as null).
+    let instances: Api<LocalInstance> = Api::namespaced(client.clone(), "team");
+    let listed = |name: &'static str| {
+        move |i: &LocalInstance| {
+            i.status
+                .as_ref()?
+                .repositories
+                .contains_key(name)
+                .then_some(())
+        }
+    };
+    testkit::polling::wait_for(&instances, "reg", TIMEOUT, POLL, listed("team/app")).await;
+    team.patch(
+        "app",
+        &PatchParams::default(),
+        &Patch::Merge(serde_json::json!({"metadata": {"annotations": {
+            api::annotations::ALLOW_DATA_DELETION: "true",
+        }}})),
+    )
+    .await
+    .unwrap();
+    team.delete("app", &Default::default()).await.unwrap();
+    let repositories = testkit::polling::wait_for(&instances, "reg", TIMEOUT, POLL, |i| {
+        let repositories = &i.status.as_ref()?.repositories;
+        (!repositories.contains_key("team/app")).then(|| repositories.clone())
+    })
+    .await;
+    assert!(repositories.contains_key("team/team"), "{repositories:?}");
     assert_eq!(health.live(), Ok(()));
 }

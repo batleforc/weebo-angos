@@ -64,6 +64,33 @@ fn advisory(reason: ReasonCode, message: impl Into<String>) -> Advisory {
     }
 }
 
+/// The status fields a pass writes, for a merge patch (`null` clears) on
+/// `previous`, the status the maintenance holds: what left a nested object
+/// (a new `lastRun` without the last one's `exitCode`…) is sent as `null`,
+/// or the patch would keep it.
+#[expect(
+    clippy::expect_used,
+    reason = "MaintenanceStatus is a struct of serializable fields: always a JSON object"
+)]
+pub fn status_fields(
+    previous: &MaintenanceStatus,
+    status: &MaintenanceStatus,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut value = serde_json::to_value(status).expect("a status serializes");
+    let map = value.as_object_mut().expect("a status is an object");
+    map.remove("conditions");
+    map.remove("observedGeneration");
+    let mut old = serde_json::to_value(previous).expect("a status serializes");
+    let old = old.as_object_mut().expect("a status is an object");
+    old.remove("conditions");
+    old.remove("observedGeneration");
+    crate::status_patch::null_removed(old, map);
+    for key in ["nextRunTime", "lastSkipTime"] {
+        map.entry(key).or_insert(serde_json::Value::Null);
+    }
+    map.clone()
+}
+
 /// How many log lines a run keeps.
 const TAIL_LINES: usize = 20;
 
@@ -331,20 +358,11 @@ async fn run(
             if asked {
                 status.run_now = run_now;
             }
+            let mut all = status_fields(pass.status, status);
             let mut fields = serde_json::Map::new();
-            fields.insert(
-                "lastRun".into(),
-                serde_json::to_value(&status.last_run).unwrap_or_default(),
-            );
-            fields.insert("runCount".into(), status.run_count.into());
-            fields.insert(
-                "runNow".into(),
-                serde_json::to_value(&status.run_now).unwrap_or_default(),
-            );
-            fields.insert(
-                "instance".into(),
-                serde_json::to_value(&status.common.instance).unwrap_or_default(),
-            );
+            for key in ["lastRun", "runCount", "runNow", "instance"] {
+                fields.insert(key.into(), all.remove(key).unwrap_or_default());
+            }
             ports
                 .ledger
                 .record(&owner.namespace, &owner.name, fields)

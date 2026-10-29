@@ -224,7 +224,7 @@ async fn apply(
         StatusUpdate {
             ready: &report.outcome.ready,
             advisories: &report.outcome.advisories,
-            fields: status_fields(&report.status),
+            fields: status_fields(&previous, &report.status),
         },
     )
     .await?;
