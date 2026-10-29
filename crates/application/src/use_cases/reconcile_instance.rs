@@ -113,16 +113,27 @@ fn credential_failure(e: CredentialError) -> Failure {
     Failure::new(e.reason(), e.to_string())
 }
 
-/// The status fields a pass writes, for a merge patch (`null` clears).
+/// The status fields a pass writes, for a merge patch (`null` clears) on
+/// `previous`, the status the instance holds: what left a map
+/// (`repositories`, `identities`, `releasedRepositories`) or a nested
+/// object is sent as `null`, or the patch would keep it.
 #[expect(
     clippy::expect_used,
     reason = "InstanceStatus is a struct of serializable fields: always a JSON object"
 )]
-pub fn status_fields(status: &InstanceStatus) -> serde_json::Map<String, serde_json::Value> {
+pub fn status_fields(
+    previous: &InstanceStatus,
+    status: &InstanceStatus,
+) -> serde_json::Map<String, serde_json::Value> {
     let mut value = serde_json::to_value(status).expect("a status serializes");
     let map = value.as_object_mut().expect("a status is an object");
     map.remove("conditions");
     map.remove("observedGeneration");
+    let mut old = serde_json::to_value(previous).expect("a status serializes");
+    let old = old.as_object_mut().expect("a status is an object");
+    old.remove("conditions");
+    old.remove("observedGeneration");
+    crate::status_patch::null_removed(old, map);
     for key in [
         "endpoint",
         "version",
@@ -1057,7 +1068,9 @@ async fn run(
         for key in ["configWrittenTime", "writtenConfigHash", "configHash"] {
             fields.insert(
                 key.into(),
-                status_fields(status).remove(key).unwrap_or_default(),
+                status_fields(pass.status, status)
+                    .remove(key)
+                    .unwrap_or_default(),
             );
         }
         fields.insert("pods".into(), serde_json::json!([]));

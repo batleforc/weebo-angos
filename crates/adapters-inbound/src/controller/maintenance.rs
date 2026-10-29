@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use api::Maintenance;
 use application::ports::{ApiError, Owner, StatusLedger};
 use application::use_cases::reconcile_maintenance::{
-    MaintenancePass, MaintenancePorts, reconcile_maintenance,
+    MaintenancePass, MaintenancePorts, reconcile_maintenance, status_fields,
 };
 use k8s_openapi::api::batch::v1::Job;
 use kube::api::Api;
@@ -108,20 +108,7 @@ async fn reconcile(obj: Arc<Maintenance>, ctx: Arc<Ctx>) -> Result<Action, Error
     .await;
     super::record_reconcile(KIND, started, &report.outcome);
     super::metrics::record_maintenance(obj.spec.task, &previous, &report.status);
-    #[expect(
-        clippy::expect_used,
-        reason = "a status is a struct of serializable fields"
-    )]
-    let mut fields = serde_json::to_value(&report.status)
-        .expect("a status serializes")
-        .as_object()
-        .cloned()
-        .unwrap_or_default();
-    fields.remove("conditions");
-    fields.remove("observedGeneration");
-    for key in ["nextRunTime", "lastSkipTime"] {
-        fields.entry(key).or_insert(serde_json::Value::Null);
-    }
+    let fields = status_fields(&previous, &report.status);
     weebo_kit_runtime::status::publish(
         &api,
         &ctx.recorder,
