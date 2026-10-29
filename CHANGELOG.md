@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.3.2](https://github.com/batleforc/weebo-angos/compare/5ab36861ecd816de37526ecf7f72d06027f8e5c4..v0.3.2) - 2026-10-29
+#### Bug Fixes
+- (**application**) null what left the status, a merge patch keeps it (#23) - ([5ab3686](https://github.com/batleforc/weebo-angos/commit/5ab36861ecd816de37526ecf7f72d06027f8e5c4)) - Maxime, Claude Opus 5.5
+
+- - -
+
 ## [v0.3.1](https://github.com/batleforc/weebo-angos/compare/581a7b7c5427fcf99c3d043dfcf34d6e69a34281..v0.3.1) - 2026-10-24
 #### Bug Fixes
 - maintenance and upgrade Jobs get the instance's env and extra volumes (#22) - ([581a7b7](https://github.com/batleforc/weebo-angos/commit/581a7b7c5427fcf99c3d043dfcf34d6e69a34281)) - Maxime, Claude Opus 5.5
